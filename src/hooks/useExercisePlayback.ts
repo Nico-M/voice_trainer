@@ -5,13 +5,12 @@ import {
   DEFAULT_BPM,
   DEFAULT_PLAY_MODE,
   getExerciseById,
-  type Exercise,
   type PlayMode,
 } from '../config/voiceTrainerExercises.ts';
+import type { Exercise } from '../config/voiceTrainerExercises.ts';
 import type { ManagedSamplerController } from './useManagedSampler.ts';
 import {
   buildNoteFromChromaticIndex,
-  getInitialExercise,
   getNextPlayMode,
   getStepDurationMs,
   getStepNoteDurationSeconds,
@@ -29,8 +28,6 @@ export interface UseExercisePlaybackResult {
 export default function useExercisePlayback(
   sampler: ManagedSamplerController,
 ): UseExercisePlaybackResult {
-  const initialExercise = getInitialExercise();
-
   const playbackRunIdRef = useRef(0);
   const playModeRef = useRef<PlayMode>(DEFAULT_PLAY_MODE);
   const bpmRef = useRef(DEFAULT_BPM);
@@ -38,14 +35,14 @@ export default function useExercisePlayback(
 
   const [autoCurrentNote, setAutoCurrentNote] = useState<string | null>(null);
   const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
-  const [pendingExerciseId, setPendingExerciseId] = useState<string | null>(initialExercise.id);
-  const [selectedExerciseId, setSelectedExerciseId] = useState(initialExercise.id);
+  const [pendingExerciseId, setPendingExerciseId] = useState<string | null>(null);
+  const [selectedExerciseId, setSelectedExerciseId] = useState('');
   const [playMode, setPlayMode] = useState<PlayMode>(DEFAULT_PLAY_MODE);
   const [bpm, setBpm] = useState(DEFAULT_BPM);
 
   const selectedExercise = useMemo(
-    () => getExerciseById(selectedExerciseId) ?? initialExercise,
-    [initialExercise, selectedExerciseId],
+    () => (selectedExerciseId ? getExerciseById(selectedExerciseId) ?? null : null),
+    [selectedExerciseId],
   );
 
   const pendingExercise = useMemo(
@@ -198,6 +195,10 @@ export default function useExercisePlayback(
   }
 
   function handleExerciseChange(nextExerciseId: string): void {
+    if (!nextExerciseId) {
+      return;
+    }
+
     const nextExercise = getExerciseById(nextExerciseId);
     if (!nextExercise) {
       return;
@@ -205,11 +206,22 @@ export default function useExercisePlayback(
 
     setSelectedExerciseId(nextExercise.id);
     stopPlayback();
-    armExercise(nextExercise);
+    setPendingExerciseId(null);
   }
 
-  function handleStopExercise(): void {
-    stopPlayback();
+  function handlePrimaryAction(): void {
+    if (activeExerciseId !== null) {
+      stopPlayback();
+      if (selectedExercise) {
+        armExercise(selectedExercise);
+      }
+      return;
+    }
+
+    if (!selectedExercise || pendingExerciseId !== null) {
+      return;
+    }
+
     armExercise(selectedExercise);
   }
 
@@ -224,7 +236,7 @@ export default function useExercisePlayback(
       selectedExerciseId,
       onBpmChange: handleBpmChange,
       onExerciseChange: handleExerciseChange,
-      onStopExercise: handleStopExercise,
+      onPrimaryAction: handlePrimaryAction,
       onToggleMode: toggleMode,
     },
     piano: {

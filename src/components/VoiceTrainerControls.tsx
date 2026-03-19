@@ -24,11 +24,11 @@ export interface VoiceTrainerControlsProps {
   isSamplerReady: boolean;
   pendingExerciseId: string | null;
   playMode: PlayMode;
-  selectedExercise: Exercise;
+  selectedExercise: Exercise | null;
   selectedExerciseId: string;
   onBpmChange: (nextBpm: number) => void;
   onExerciseChange: (exerciseId: string) => void;
-  onStopExercise: () => void;
+  onPrimaryAction: () => void;
   onToggleMode: () => void;
 }
 
@@ -69,6 +69,26 @@ function getStopButtonShadow(isActive: boolean): string {
   return isActive ? '4px 4px 0px #000' : '2px 2px 0px #777';
 }
 
+function getPrimaryButtonLabel(
+  selectedExerciseId: string,
+  activeExerciseId: string | null,
+  pendingExerciseId: string | null,
+): string {
+  if (activeExerciseId !== null) {
+    return '停止';
+  }
+
+  if (pendingExerciseId !== null) {
+    return '待命';
+  }
+
+  if (selectedExerciseId) {
+    return '开始';
+  }
+
+  return '开始';
+}
+
 export default function VoiceTrainerControls({
   activeExerciseId,
   bpm,
@@ -79,16 +99,22 @@ export default function VoiceTrainerControls({
   selectedExerciseId,
   onBpmChange,
   onExerciseChange,
-  onStopExercise,
+  onPrimaryAction,
   onToggleMode,
 }: VoiceTrainerControlsProps): ReactElement {
   // 将视觉状态先算出来，下面的样式只消费结果，避免 JSX 里堆积条件判断。
-  const exerciseStatus = getExerciseVisualStatus(
+  const exerciseStatus = selectedExerciseId
+    ? getExerciseVisualStatus(selectedExerciseId, activeExerciseId, pendingExerciseId)
+    : 'idle';
+  const isExerciseActive = activeExerciseId !== null;
+  const isExercisePending = pendingExerciseId !== null;
+  const hasSelectedExercise = selectedExercise !== null;
+  const primaryButtonLabel = getPrimaryButtonLabel(
     selectedExerciseId,
     activeExerciseId,
     pendingExerciseId,
   );
-  const isExerciseActive = activeExerciseId !== null;
+  const isPrimaryActionEnabled = hasSelectedExercise && (isExerciseActive || !isExercisePending);
 
   function handleExerciseSelect(event: SelectChangeEvent<string>): void {
     onExerciseChange(event.target.value);
@@ -183,6 +209,13 @@ export default function VoiceTrainerControls({
               value={selectedExerciseId}
               onChange={handleExerciseSelect}
               displayEmpty
+              renderValue={(selected) => {
+                if (!selected) {
+                  return '请选择练习';
+                }
+
+                return selectedExercise?.name ?? '请选择练习';
+              }}
               sx={{
                 bgcolor: '#fff',
                 border: '3px solid #000',
@@ -194,14 +227,47 @@ export default function VoiceTrainerControls({
                 },
               }}
             >
+              <MenuItem value="" disabled>
+                请选择练习
+              </MenuItem>
               {EXERCISES.map((exercise) => (
-                <MenuItem key={exercise.id} value={exercise.id}>
-                  {exercise.name}
+                <MenuItem key={exercise.id} value={exercise.id} sx={{ alignItems: 'flex-start' }}>
+                  <Box sx={{ display: 'flex', width: '100%', gap: 1.5, alignItems: 'flex-start' }}>
+                    <Typography
+                      sx={{
+                        minWidth: 52,
+                        fontWeight: 900,
+                        fontSize: '0.84rem',
+                        lineHeight: 1.2,
+                        color: '#000',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {exercise.name}
+                    </Typography>
+                    <Typography
+                      sx={{
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        lineHeight: 1.25,
+                        color: '#444',
+                        whiteSpace: 'normal',
+                        wordBreak: 'break-word',
+                        flex: 1,
+                      }}
+                    >
+                      {exercise.desc}
+                    </Typography>
+                  </Box>
                 </MenuItem>
               ))}
             </Select>
           </FormControl>
-          <ButtonBase onClick={onStopExercise} disabled={!isExerciseActive} sx={{ display: 'block' }}>
+          <ButtonBase
+            onClick={onPrimaryAction}
+            disabled={!isPrimaryActionEnabled}
+            sx={{ display: 'block' }}
+          >
             <Box
               sx={{
                 minWidth: 72,
@@ -211,14 +277,14 @@ export default function VoiceTrainerControls({
                 justifyContent: 'center',
                 px: 1.5,
                 py: 1,
-                bgcolor: getStopButtonBackground(isExerciseActive),
+                bgcolor: getStopButtonBackground(isExerciseActive || isExercisePending),
                 border: '3px solid #000',
                 borderRadius: '12px',
-                boxShadow: getStopButtonShadow(isExerciseActive),
+                boxShadow: getStopButtonShadow(isExerciseActive || isExercisePending),
                 fontWeight: 900,
               }}
             >
-              {isExerciseActive ? '停止' : '待命'}
+              {primaryButtonLabel}
             </Box>
           </ButtonBase>
         </Box>
@@ -237,17 +303,17 @@ export default function VoiceTrainerControls({
             当前练习
           </Typography>
           <Typography sx={{ fontWeight: 900, fontSize: '0.92rem', lineHeight: 1.2 }}>
-            {selectedExercise.name}
+            {selectedExercise?.name ?? '未选择练习'}
           </Typography>
           <Typography sx={{ mt: 0.4, fontSize: '0.75rem', fontWeight: 700 }}>
-            {selectedExercise.desc}
+            {selectedExercise?.desc ?? '先选择练习，再点击开始，然后按键盘上的音符。'}
           </Typography>
           {!isSamplerReady && (
             <Typography sx={{ mt: 0.6, fontSize: '0.68rem', fontWeight: 900, color: '#ff0064' }}>
               音色加载中，请稍候后再按键盘开始
             </Typography>
           )}
-          {exerciseStatus === 'pending' && (
+          {hasSelectedExercise && exerciseStatus === 'pending' && (
             <Typography sx={{ mt: 0.6, fontSize: '0.68rem', fontWeight: 900, color: '#ff0064' }}>
               已选中，按键盘上的任意起始音开始
             </Typography>
