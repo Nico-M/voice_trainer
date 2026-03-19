@@ -18,9 +18,9 @@ export interface Exercise {
 }
 
 export const DEFAULT_PLAY_MODE: PlayMode = 'up';
-export const DEFAULT_BPM = 70;
-export const MIN_BPM = 50;
-export const MAX_BPM = 140;
+export const DEFAULT_BPM = 90;
+export const MIN_BPM = 60;
+export const MAX_BPM = 150;
 export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const MODE_LABELS: Record<PlayMode, string> = {
   once: '单次循环',
