@@ -217,6 +217,7 @@ export default function useExercisePlayback(
     controls: {
       activeExerciseId,
       bpm,
+      isSamplerReady: sampler.isSamplerReady,
       pendingExerciseId,
       playMode,
       selectedExercise,
@@ -227,6 +228,7 @@ export default function useExercisePlayback(
       onToggleMode: toggleMode,
     },
     piano: {
+      disabled: !sampler.isSamplerReady,
       onNoteDown: handleNoteDown,
       onNoteUp: handleNoteUp,
       pressedNotes: autoCurrentNote ? [autoCurrentNote] : [],

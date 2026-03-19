@@ -21,6 +21,7 @@ type ExerciseVisualStatus = 'active' | 'pending' | 'idle';
 export interface VoiceTrainerControlsProps {
   activeExerciseId: string | null;
   bpm: number;
+  isSamplerReady: boolean;
   pendingExerciseId: string | null;
   playMode: PlayMode;
   selectedExercise: Exercise;
@@ -71,6 +72,7 @@ function getStopButtonShadow(isActive: boolean): string {
 export default function VoiceTrainerControls({
   activeExerciseId,
   bpm,
+  isSamplerReady,
   pendingExerciseId,
   playMode,
   selectedExercise,
@@ -240,6 +242,11 @@ export default function VoiceTrainerControls({
           <Typography sx={{ mt: 0.4, fontSize: '0.75rem', fontWeight: 700 }}>
             {selectedExercise.desc}
           </Typography>
+          {!isSamplerReady && (
+            <Typography sx={{ mt: 0.6, fontSize: '0.68rem', fontWeight: 900, color: '#ff0064' }}>
+              音色加载中，请稍候后再按键盘开始
+            </Typography>
+          )}
           {exerciseStatus === 'pending' && (
             <Typography sx={{ mt: 0.6, fontSize: '0.68rem', fontWeight: 900, color: '#ff0064' }}>
               已选中，按键盘上的任意起始音开始

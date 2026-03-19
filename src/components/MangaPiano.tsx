@@ -14,6 +14,8 @@ interface PianoKey {
 }
 
 export interface MangaPianoProps {
+  // 资源尚未就绪时，键盘只展示，不响应触发。
+  disabled?: boolean;
   // 用户手动按下键时，通知外层组件。
   onNoteDown?: (note: string) => void;
   // 用户抬手时，通知外层组件释放音符。
@@ -97,6 +99,7 @@ function configureCanvas(
 }
 
 export default function MangaPiano({
+  disabled = false,
   onNoteDown,
   onNoteUp,
   pressedNotes = [],
@@ -108,6 +111,12 @@ export default function MangaPiano({
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   // 外层容器：用来读取当前可用宽度，从而算出 viewportWidth。
   const containerRef = useRef<HTMLDivElement>(null);
+  // 主键盘按单点交互处理，所以只追踪一个活动 pointer。
+  const activeMainPointerIdRef = useRef<number | null>(null);
+  // 预览条拖拽同样只允许一个 pointer 接管，避免多指拖动打乱视窗。
+  const activePreviewPointerIdRef = useRef<number | null>(null);
+  // 用 ref 镜像当前本地按下音，确保 pointer release 时拿到最新值。
+  const localActiveNoteRef = useRef<string | null>(null);
 
   // 当前设备屏幕里能看到多宽的主键盘。
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -117,8 +126,6 @@ export default function MangaPiano({
   // 当前用户手指/鼠标正在按住的单个音符。
   // 当前实现先按单点触控设计，所以这里只保存一个音。
   const [localActiveNote, setLocalActiveNote] = useState<string | null>(null);
-  // 顶部预览条是否处于拖动中。拖动期间会把 window 级 move 事件接管过来。
-  const [isDraggingPreview, setIsDraggingPreview] = useState(false);
 
   // 预览条实际可用宽度，扣掉左右 padding 后得到。
   const previewWidth = Math.max(viewportWidth - PREVIEW_PADDING * 2, 0);
@@ -207,6 +214,12 @@ export default function MangaPiano({
   const blackKeys = useMemo(() => keys.filter((key) => key.isBlack), [keys]);
   // 完整键盘总宽度只看白键数量即可，因为黑键不额外扩展总宽度。
   const totalWidth = useMemo(() => whiteKeys.length * WHITE_KEY_WIDTH, [whiteKeys]);
+
+  const setCurrentLocalActiveNote = useCallback((note: string | null) => {
+    // ref 与 state 同步更新，避免 release 时读到陈旧的按下音。
+    localActiveNoteRef.current = note;
+    setLocalActiveNote(note);
+  }, []);
 
   // 首次进入时把视窗落在中音区附近，避免默认停在 A0 左侧太偏。
   useEffect(() => {
@@ -399,34 +412,13 @@ export default function MangaPiano({
     drawPreview();
   }, [drawPreview]);
 
-  // 主键盘只负责命中和按键反馈，不承担拖动画布职责。
-  const handleInteraction = (e: React.MouseEvent | React.TouchEvent, type: 'down' | 'up') => {
-    if ('touches' in e) {
-      // 如果不阻止默认行为，移动端可能会把这次操作识别成页面滚动或浏览器手势。
-      e.preventDefault();
-    }
-
-    if (type === 'up') {
-      // 抬手时统一释放当前本地按键状态，并通知外部停止发声。
-      if (localActiveNote && onNoteUp) onNoteUp(localActiveNote);
-      setLocalActiveNote(null);
-      return;
-    }
-
+  const findNoteAtMainCanvasPoint = useCallback((clientX: number, clientY: number): string | null => {
     const canvas = mainCanvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      return null;
+    }
 
     const rect = canvas.getBoundingClientRect();
-    let clientX: number, clientY: number;
-
-    if ('touches' in e) {
-      clientX = e.touches[0].clientX;
-      clientY = e.touches[0].clientY;
-    } else {
-      clientX = (e as React.MouseEvent).clientX;
-      clientY = (e as React.MouseEvent).clientY;
-    }
-
     // 把浏览器事件坐标转换成完整键盘坐标：
     // 1. 先减去 canvas 左上角，得到 canvas 内部坐标
     // 2. x 再加回 viewportOffset，映射到完整键盘坐标系
@@ -434,30 +426,85 @@ export default function MangaPiano({
     const x = clientX - rect.left + viewportOffset;
     const y = clientY - rect.top - MAIN_TOP_MARGIN;
 
-    let foundNote: string | null = null;
-
     // 命中顺序也必须先黑后白。
     // 因为黑键视觉上覆盖在白键上方，同一区域优先命中黑键才符合用户直觉。
-    const hitBlack = blackKeys.find(k => 
-      x >= k.x && x <= k.x + k.width && y >= 0 && y <= k.height
+    const hitBlack = blackKeys.find((key) =>
+      x >= key.x && x <= key.x + key.width && y >= 0 && y <= key.height,
     );
 
     if (hitBlack) {
-      foundNote = hitBlack.note;
-    } else {
-      const hitWhite = whiteKeys.find(k => 
-        x >= k.x && x <= k.x + k.width && y >= 0 && y <= k.height
-      );
-      if (hitWhite) foundNote = hitWhite.note;
+      return hitBlack.note;
     }
 
-    if (foundNote && foundNote !== localActiveNote) {
-      // 当前版本先按“单音触发”设计。
-      // 只有碰到新音符时才更新状态，避免重复触发同一颗键。
-      setLocalActiveNote(foundNote);
-      if (onNoteDown) onNoteDown(foundNote);
+    const hitWhite = whiteKeys.find((key) =>
+      x >= key.x && x <= key.x + key.width && y >= 0 && y <= key.height,
+    );
+    return hitWhite?.note ?? null;
+  }, [blackKeys, viewportOffset, whiteKeys]);
+
+  const releaseLocalActiveNote = useCallback(() => {
+    const activeNote = localActiveNoteRef.current;
+    if (activeNote && onNoteUp) {
+      onNoteUp(activeNote);
     }
-  };
+
+    setCurrentLocalActiveNote(null);
+  }, [onNoteUp, setCurrentLocalActiveNote]);
+
+  const finishMainPointerInteraction = useCallback((pointerId: number) => {
+    if (activeMainPointerIdRef.current !== pointerId) {
+      return;
+    }
+
+    activeMainPointerIdRef.current = null;
+    releaseLocalActiveNote();
+  }, [releaseLocalActiveNote]);
+
+  const handleMainPointerDown = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (disabled) {
+      return;
+    }
+
+    // 鼠标场景只响应左键，避免右键/中键误触。
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return;
+    }
+
+    // 当前版本按单点处理；已有活动 pointer 时忽略新的输入。
+    if (activeMainPointerIdRef.current !== null) {
+      return;
+    }
+
+    const foundNote = findNoteAtMainCanvasPoint(event.clientX, event.clientY);
+    if (!foundNote) {
+      return;
+    }
+
+    activeMainPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    if (localActiveNoteRef.current && localActiveNoteRef.current !== foundNote && onNoteUp) {
+      onNoteUp(localActiveNoteRef.current);
+    }
+
+    if (foundNote !== localActiveNoteRef.current) {
+      // 只在真正命中新音时才触发，避免重复 attack 同一键。
+      setCurrentLocalActiveNote(foundNote);
+      onNoteDown?.(foundNote);
+    }
+  }, [disabled, findNoteAtMainCanvasPoint, onNoteDown, onNoteUp, setCurrentLocalActiveNote]);
+
+  const handleMainPointerUp = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    finishMainPointerInteraction(event.pointerId);
+  }, [finishMainPointerInteraction]);
+
+  const handleMainPointerCancel = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    finishMainPointerInteraction(event.pointerId);
+  }, [finishMainPointerInteraction]);
+
+  const handleMainLostPointerCapture = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    finishMainPointerInteraction(event.pointerId);
+  }, [finishMainPointerInteraction]);
 
   const handlePreviewMove = useCallback((clientX: number) => {
     const canvas = previewCanvasRef.current;
@@ -477,44 +524,50 @@ export default function MangaPiano({
     setViewportOffset(newOffset);
   }, [totalWidth, viewportWidth]);
 
-  const handlePreviewInteraction = (e: React.MouseEvent | React.TouchEvent) => {
-    if ('touches' in e) {
-      // 顶部预览条本身也要拦住默认手势，不然拖动时页面可能跟着滚。
-      e.preventDefault();
+  const finishPreviewPointerInteraction = useCallback((pointerId: number) => {
+    if (activePreviewPointerIdRef.current !== pointerId) {
+      return;
     }
 
-    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    activePreviewPointerIdRef.current = null;
+  }, []);
+
+  const handlePreviewPointerDown = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    // 鼠标场景只响应左键拖动，避免其他按键干扰视窗。
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return;
+    }
+
+    if (activePreviewPointerIdRef.current !== null) {
+      return;
+    }
+
+    activePreviewPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+
     // 按下预览条时先立即同步一次位置，然后进入拖拽态。
-    handlePreviewMove(clientX);
-    setIsDraggingPreview(true);
-  };
+    handlePreviewMove(event.clientX);
+  }, [handlePreviewMove]);
 
-  useEffect(() => {
-    const onMove = (e: MouseEvent | TouchEvent) => {
-      if (!isDraggingPreview) return;
-      // 触摸结束后 touches 会变空，所以这里先守住，避免访问 e.touches[0] 报错。
-      if ('touches' in e && e.touches.length === 0) return;
+  const handlePreviewPointerMove = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activePreviewPointerIdRef.current !== event.pointerId) {
+      return;
+    }
 
-      const clientX = 'touches' in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
-      handlePreviewMove(clientX);
-    };
-    // 鼠标抬起和手指离开统一结束拖拽。
-    const onEnd = () => setIsDraggingPreview(false);
+    handlePreviewMove(event.clientX);
+  }, [handlePreviewMove]);
 
-    // move/end 挂到 window 上，而不是只挂在 preview canvas 上。
-    // 这样用户拖着拖着跑出预览条区域，拖动仍然不会中断。
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onEnd);
-    window.addEventListener('touchmove', onMove);
-    window.addEventListener('touchend', onEnd);
+  const handlePreviewPointerUp = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    finishPreviewPointerInteraction(event.pointerId);
+  }, [finishPreviewPointerInteraction]);
 
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onEnd);
-      window.removeEventListener('touchmove', onMove);
-      window.removeEventListener('touchend', onEnd);
-    };
-  }, [isDraggingPreview, handlePreviewMove]);
+  const handlePreviewPointerCancel = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    finishPreviewPointerInteraction(event.pointerId);
+  }, [finishPreviewPointerInteraction]);
+
+  const handlePreviewLostPointerCapture = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+    finishPreviewPointerInteraction(event.pointerId);
+  }, [finishPreviewPointerInteraction]);
 
   return (
     <div ref={containerRef} style={{ width: '100%', overflow: 'hidden', userSelect: 'none', touchAction: 'none' }}>
@@ -524,9 +577,12 @@ export default function MangaPiano({
           ref={previewCanvasRef}
           width={previewWidth}
           height={PREVIEW_HEIGHT}
-          onMouseDown={handlePreviewInteraction}
-          onTouchStart={handlePreviewInteraction}
-          style={{ display: 'block', borderRadius: '8px', cursor: 'pointer' }}
+          onPointerDown={handlePreviewPointerDown}
+          onPointerMove={handlePreviewPointerMove}
+          onPointerUp={handlePreviewPointerUp}
+          onPointerCancel={handlePreviewPointerCancel}
+          onLostPointerCapture={handlePreviewLostPointerCapture}
+          style={{ display: 'block', borderRadius: '8px', cursor: 'pointer', touchAction: 'none' }}
         />
       </div>
 
@@ -536,13 +592,42 @@ export default function MangaPiano({
           ref={mainCanvasRef}
           width={viewportWidth}
           height={mainCanvasHeight}
-          onMouseDown={(e) => handleInteraction(e, 'down')}
-          onMouseUp={(e) => handleInteraction(e, 'up')}
-          onMouseLeave={(e) => handleInteraction(e, 'up')}
-          onTouchStart={(e) => handleInteraction(e, 'down')}
-          onTouchEnd={(e) => handleInteraction(e, 'up')}
-          style={{ display: 'block' }}
+          onPointerDown={handleMainPointerDown}
+          onPointerUp={handleMainPointerUp}
+          onPointerCancel={handleMainPointerCancel}
+          onLostPointerCapture={handleMainLostPointerCapture}
+          style={{ display: 'block', touchAction: 'none' }}
         />
+
+        {disabled && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(255, 255, 255, 0.5)',
+              backdropFilter: 'blur(1px)',
+              zIndex: 8,
+              pointerEvents: 'none',
+            }}
+          >
+            <div
+              style={{
+                background: '#ffde00',
+                border: '4px solid #000',
+                boxShadow: '4px 4px 0 #000',
+                padding: '10px 18px',
+                fontSize: '14px',
+                fontWeight: 900,
+                transform: 'rotate(-2deg)',
+              }}
+            >
+              音色加载中...
+            </div>
+          </div>
+        )}
         
         {/* 用悬浮提示把当前按下音符放大，移动端阅读更轻松。 */}
         {allActiveNotes.size > 0 && (

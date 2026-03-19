@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import MySampler from '../audio/sampler.ts';
 
 export interface ManagedSamplerController {
+  isSamplerReady: boolean;
   isReady: () => boolean;
   triggerAttackRelease: (note: string, duration: number) => Promise<void>;
   triggerAttack: (note: string) => Promise<void>;
@@ -12,6 +13,7 @@ export interface ManagedSamplerController {
 export default function useManagedSampler(): ManagedSamplerController {
   const samplerRef = useRef<MySampler | null>(null);
   const samplerReadyRef = useRef(false);
+  const [isSamplerReady, setIsSamplerReady] = useState(false);
 
   useEffect(() => {
     const sampler = new MySampler();
@@ -19,6 +21,7 @@ export default function useManagedSampler(): ManagedSamplerController {
 
     samplerRef.current = sampler;
     samplerReadyRef.current = false;
+    setIsSamplerReady(false);
 
     void sampler.ready().then(() => {
       // 组件已经卸载时，不再回写 ready 状态，避免后续逻辑误判。
@@ -27,11 +30,13 @@ export default function useManagedSampler(): ManagedSamplerController {
       }
 
       samplerReadyRef.current = true;
+      setIsSamplerReady(true);
     });
 
     return () => {
       disposed = true;
       samplerReadyRef.current = false;
+      setIsSamplerReady(false);
 
       if (sampler.loaded) {
         void sampler.releaseAll();
@@ -51,6 +56,7 @@ export default function useManagedSampler(): ManagedSamplerController {
   }
 
   return {
+    isSamplerReady,
     isReady(): boolean {
       return samplerReadyRef.current;
     },
