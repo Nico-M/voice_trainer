@@ -1,0 +1,4 @@
+{
+  // 这是 React 工作区，显式标记 Volar 为非推荐扩展，避免误装或误启用。
+  "unwantedRecommendations": ["Vue.volar"]
+}
