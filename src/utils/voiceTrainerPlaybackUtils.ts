@@ -6,6 +6,20 @@ import {
 } from '../config/voiceTrainerExercises.ts';
 
 const PLAY_MODE_SEQUENCE: PlayMode[] = ['once', 'up', 'down'];
+export const DEFAULT_LOWER_BOUND_NOTE = 'C3';
+export const DEFAULT_UPPER_BOUND_NOTE = 'C5';
+export const MIN_BOUNDARY_NOTE = 'C2';
+export const MAX_BOUNDARY_NOTE = 'C6';
+
+export interface ExerciseIntervalBounds {
+  minInterval: number;
+  maxInterval: number;
+}
+
+export interface BoundaryNoteOption {
+  label: string;
+  value: string;
+}
 
 export function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -66,4 +80,119 @@ export function buildNoteFromChromaticIndex(totalIndex: number): string {
 
 export function isPlayableIndex(totalIndex: number): boolean {
   return totalIndex >= 9 && totalIndex <= 96;
+}
+
+// 边界音的选择项不必铺满整张钢琴，先限制在更常用的练声区间里，避免下拉过长。
+export function getBoundaryNoteOptions(): BoundaryNoteOption[] {
+  const minIndex = parseNoteToChromaticIndex(MIN_BOUNDARY_NOTE);
+  const maxIndex = parseNoteToChromaticIndex(MAX_BOUNDARY_NOTE);
+
+  if (minIndex === null || maxIndex === null || minIndex > maxIndex) {
+    return [];
+  }
+
+  const options: BoundaryNoteOption[] = [];
+
+  for (let currentIndex = minIndex; currentIndex <= maxIndex; currentIndex += 1) {
+    const note = buildNoteFromChromaticIndex(currentIndex);
+    options.push({
+      label: note,
+      value: note,
+    });
+  }
+
+  return options;
+}
+
+// 练习的最高/最低实际发声音高，取决于 steps 里的相对 interval 范围。
+export function getExerciseIntervalBounds(exercise: Exercise): ExerciseIntervalBounds {
+  return exercise.steps.reduce<ExerciseIntervalBounds>(
+    (bounds, step) => ({
+      minInterval: Math.min(bounds.minInterval, step.interval),
+      maxInterval: Math.max(bounds.maxInterval, step.interval),
+    }),
+    { minInterval: Number.POSITIVE_INFINITY, maxInterval: Number.NEGATIVE_INFINITY },
+  );
+}
+
+// 起始音是否合法，不看根音本身，而是看整条练习实际发出的最低/最高音是否仍在可播放范围内。
+export function isExerciseStartIndexPlayable(exercise: Exercise, startIndex: number): boolean {
+  const { minInterval, maxInterval } = getExerciseIntervalBounds(exercise);
+  return isPlayableIndex(startIndex + minInterval) && isPlayableIndex(startIndex + maxInterval);
+}
+
+interface AutoRoundStartIndexesOptions {
+  exercise: Exercise;
+  lowerBoundIndex: number;
+  playMode: 'up' | 'down';
+  startNoteIndex: number;
+  upperBoundIndex: number;
+}
+
+function buildRoundTripStartIndexes(
+  startNoteIndex: number,
+  turnStartIndex: number,
+  direction: 1 | -1,
+): number[] {
+  const roundStartIndexes = [startNoteIndex];
+
+  if (startNoteIndex === turnStartIndex) {
+    return roundStartIndexes;
+  }
+
+  if (direction === 1) {
+    for (let nextStartIndex = startNoteIndex + 1; nextStartIndex <= turnStartIndex; nextStartIndex += 1) {
+      roundStartIndexes.push(nextStartIndex);
+    }
+
+    for (let nextStartIndex = turnStartIndex - 1; nextStartIndex >= startNoteIndex; nextStartIndex -= 1) {
+      roundStartIndexes.push(nextStartIndex);
+    }
+
+    return roundStartIndexes;
+  }
+
+  for (let nextStartIndex = startNoteIndex - 1; nextStartIndex >= turnStartIndex; nextStartIndex -= 1) {
+    roundStartIndexes.push(nextStartIndex);
+  }
+
+  for (let nextStartIndex = turnStartIndex + 1; nextStartIndex <= startNoteIndex; nextStartIndex += 1) {
+    roundStartIndexes.push(nextStartIndex);
+  }
+
+  return roundStartIndexes;
+}
+
+// 自动上行/下行不再无限推进，而是在默认音域边界内构造一条“去程 + 回程”的播放计划。
+export function buildAutoRoundStartIndexes({
+  exercise,
+  lowerBoundIndex,
+  playMode,
+  startNoteIndex,
+  upperBoundIndex,
+}: AutoRoundStartIndexesOptions): number[] | null {
+  const { minInterval, maxInterval } = getExerciseIntervalBounds(exercise);
+  const turnStartIndex =
+    playMode === 'up' ? upperBoundIndex - maxInterval : lowerBoundIndex - minInterval;
+
+  if (playMode === 'up' && startNoteIndex > turnStartIndex) {
+    return null;
+  }
+
+  if (playMode === 'down' && startNoteIndex < turnStartIndex) {
+    return null;
+  }
+
+  if (
+    !isExerciseStartIndexPlayable(exercise, startNoteIndex) ||
+    !isExerciseStartIndexPlayable(exercise, turnStartIndex)
+  ) {
+    return null;
+  }
+
+  return buildRoundTripStartIndexes(
+    startNoteIndex,
+    turnStartIndex,
+    playMode === 'up' ? 1 : -1,
+  );
 }

@@ -26,6 +26,8 @@ export interface MangaPianoProps {
   // 当外部指定了 followNote 时，键盘会自动把该音符保持在当前视窗内。
   // 这里主要给自动播放使用，手动拖动预览条时仍然保留原有交互。
   followNote?: string | null;
+  // 标记本次练习最初选中的起始音，方便用户知道返程会落回哪里停止。
+  startNoteMarker?: string | null;
 }
 
 // 一个八度里完整的 12 个半音名称。
@@ -104,6 +106,7 @@ export default function MangaPiano({
   onNoteUp,
   pressedNotes = [],
   followNote = null,
+  startNoteMarker = null,
 }: MangaPianoProps) {
   // 主键盘：负责绘制可视区域里的琴键，并处理按键命中。
   const mainCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -280,7 +283,7 @@ export default function MangaPiano({
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
 
-    const drawKey = (key: PianoKey, isPressed: boolean) => {
+    const drawKey = (key: PianoKey, isPressed: boolean, isStartMarker: boolean) => {
       const { x, width, height, isBlack, note } = key;
       const solfege = getSolfegeLabel(note);
       // 完整键盘坐标 -> 当前屏幕内绘制坐标。
@@ -346,14 +349,28 @@ export default function MangaPiano({
         ctx.fillText(solfege, width / 2, height - 12);
       }
 
+      if (isStartMarker) {
+        // 起始音标记故意做得很小，只承担“告诉用户终点在哪”的作用，不抢自动播放高亮的戏。
+        ctx.fillStyle = '#ff0064';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(width / 2, 14, isBlack ? 10 : 11, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText('S', width / 2, 18);
+      }
+
       ctx.restore();
     };
 
     // 绘制顺序必须先白后黑。
     // 因为视觉上黑键是压在白键上方的，如果顺序反了，层级会错。
-    whiteKeys.forEach(key => drawKey(key, allActiveNotes.has(key.note)));
-    blackKeys.forEach(key => drawKey(key, allActiveNotes.has(key.note)));
-  }, [allActiveNotes, blackKeys, mainCanvasHeight, viewportOffset, viewportWidth, whiteKeys]);
+    whiteKeys.forEach(key => drawKey(key, allActiveNotes.has(key.note), key.note === startNoteMarker));
+    blackKeys.forEach(key => drawKey(key, allActiveNotes.has(key.note), key.note === startNoteMarker));
+  }, [allActiveNotes, blackKeys, mainCanvasHeight, startNoteMarker, viewportOffset, viewportWidth, whiteKeys]);
 
   const drawPreview = useCallback(() => {
     const canvas = previewCanvasRef.current;
@@ -386,6 +403,24 @@ export default function MangaPiano({
       ctx.fillRect(key.x * scale, 5, key.width * scale, (h - 10) * 0.6);
     });
 
+    if (startNoteMarker) {
+      const markerKey = keys.find((key) => key.note === startNoteMarker);
+      if (markerKey) {
+        const markerCenterX = (markerKey.x + markerKey.width / 2) * scale;
+
+        ctx.fillStyle = '#ff0064';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(markerCenterX, 4);
+        ctx.lineTo(markerCenterX - 5, 12);
+        ctx.lineTo(markerCenterX + 5, 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
     // 视窗框表示“当前主键盘屏幕里看到的是完整键盘的哪一段”。
     // viewportOffset 和 viewportWidth 都在完整键盘坐标系里，所以这里要一起乘 scale。
     const vpX = viewportOffset * scale;
@@ -402,7 +437,7 @@ export default function MangaPiano({
     ctx.beginPath();
     ctx.arc(vpX + vpW / 2, h / 2, 4, 0, Math.PI * 2);
     ctx.fill();
-  }, [blackKeys, previewWidth, totalWidth, viewportOffset, viewportWidth, whiteKeys]);
+  }, [blackKeys, keys, previewWidth, startNoteMarker, totalWidth, viewportOffset, viewportWidth, whiteKeys]);
 
   useEffect(() => {
     drawMain();

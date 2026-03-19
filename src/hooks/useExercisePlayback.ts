@@ -10,11 +10,14 @@ import {
 import type { Exercise } from '../config/voiceTrainerExercises.ts';
 import type { ManagedSamplerController } from './useManagedSampler.ts';
 import {
+  buildAutoRoundStartIndexes,
   buildNoteFromChromaticIndex,
+  DEFAULT_LOWER_BOUND_NOTE,
+  DEFAULT_UPPER_BOUND_NOTE,
   getNextPlayMode,
   getStepDurationMs,
   getStepNoteDurationSeconds,
-  isPlayableIndex,
+  isExerciseStartIndexPlayable,
   parseNoteToChromaticIndex,
   shouldPickStartNote,
   wait,
@@ -35,10 +38,14 @@ export default function useExercisePlayback(
 
   const [autoCurrentNote, setAutoCurrentNote] = useState<string | null>(null);
   const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
+  const [exerciseStartNote, setExerciseStartNote] = useState<string | null>(null);
   const [pendingExerciseId, setPendingExerciseId] = useState<string | null>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [selectedExerciseId, setSelectedExerciseId] = useState('');
   const [playMode, setPlayMode] = useState<PlayMode>(DEFAULT_PLAY_MODE);
   const [bpm, setBpm] = useState(DEFAULT_BPM);
+  const [lowerBoundNote, setLowerBoundNote] = useState(DEFAULT_LOWER_BOUND_NOTE);
+  const [upperBoundNote, setUpperBoundNote] = useState(DEFAULT_UPPER_BOUND_NOTE);
 
   const selectedExercise = useMemo(
     () => (selectedExerciseId ? getExerciseById(selectedExerciseId) ?? null : null),
@@ -56,6 +63,8 @@ export default function useExercisePlayback(
   }
 
   function armExercise(exercise: Exercise | undefined): void {
+    setPlaybackError(null);
+
     if (!exercise) {
       setPendingExerciseId(null);
       return;
@@ -72,6 +81,7 @@ export default function useExercisePlayback(
   function clearAutoPlaybackState(): void {
     setAutoCurrentNote(null);
     setActiveExerciseId(null);
+    setExerciseStartNote(null);
   }
 
   function stopPlayback(): void {
@@ -90,6 +100,7 @@ export default function useExercisePlayback(
   }, []);
 
   function toggleMode(): void {
+    setPlaybackError(null);
     setPlayMode((prevMode) => {
       const nextMode = getNextPlayMode(prevMode);
       playModeRef.current = nextMode;
@@ -97,19 +108,60 @@ export default function useExercisePlayback(
     });
   }
 
+  function setCurrentPlayMode(nextMode: PlayMode): void {
+    playModeRef.current = nextMode;
+    setPlayMode(nextMode);
+  }
+
   function handleBpmChange(nextBpm: number): void {
     bpmRef.current = nextBpm;
     setBpm(nextBpm);
   }
 
+  function handleLowerBoundNoteChange(nextLowerBoundNote: string): void {
+    const nextLowerBoundIndex = parseNoteToChromaticIndex(nextLowerBoundNote);
+    const currentUpperBoundIndex = parseNoteToChromaticIndex(upperBoundNote);
+
+    if (nextLowerBoundIndex === null || currentUpperBoundIndex === null) {
+      return;
+    }
+
+    // 如果用户把最低音拖过了最高音，就顺手把最高音一起推到同一个值，减少无效状态。
+    if (nextLowerBoundIndex > currentUpperBoundIndex) {
+      setUpperBoundNote(nextLowerBoundNote);
+    }
+
+    setLowerBoundNote(nextLowerBoundNote);
+    setPlaybackError(null);
+    stopPlayback();
+  }
+
+  function handleUpperBoundNoteChange(nextUpperBoundNote: string): void {
+    const currentLowerBoundIndex = parseNoteToChromaticIndex(lowerBoundNote);
+    const nextUpperBoundIndex = parseNoteToChromaticIndex(nextUpperBoundNote);
+
+    if (currentLowerBoundIndex === null || nextUpperBoundIndex === null) {
+      return;
+    }
+
+    // 同理，最高音不能落到最低音以下；这里直接把最低音收拢到同一格。
+    if (nextUpperBoundIndex < currentLowerBoundIndex) {
+      setLowerBoundNote(nextUpperBoundNote);
+    }
+
+    setUpperBoundNote(nextUpperBoundNote);
+    setPlaybackError(null);
+    stopPlayback();
+  }
+
   function handleNoteDown(note: string): void {
     if (pendingExercise) {
       // 当前按键只承担“选择起始音”的职责，不再额外触发手动弹奏。
-      setPendingExerciseId(null);
       void playExercise(pendingExercise, note);
       return;
     }
 
+    setPlaybackError(null);
     manualHeldNoteRef.current = note;
     void sampler.triggerAttack(note);
   }
@@ -130,6 +182,7 @@ export default function useExercisePlayback(
 
     const startNoteIndex = parseNoteToChromaticIndex(startNote);
     if (startNoteIndex === null) {
+      setPlaybackError('当前起始音无法识别，请换一个键再试。');
       return;
     }
 
@@ -138,24 +191,63 @@ export default function useExercisePlayback(
       return;
     }
 
+    // 单次模式也需要先确认整条练习能完整落在采样可播放区间里。
+    if (!isExerciseStartIndexPlayable(exercise, startNoteIndex)) {
+      setPlaybackError('这个起始音超出当前练习的可播放范围，请换一个更合适的音。');
+      return;
+    }
+
+    const currentPlayMode = playModeRef.current;
+    const lowerBoundIndex = parseNoteToChromaticIndex(lowerBoundNote);
+    const upperBoundIndex = parseNoteToChromaticIndex(upperBoundNote);
+    let roundStartIndexes = [startNoteIndex];
+
+    if (currentPlayMode === 'up' || currentPlayMode === 'down') {
+      if (lowerBoundIndex === null || upperBoundIndex === null) {
+        setPlaybackError('练习音域配置异常，请重新调整最低音和最高音。');
+        return;
+      }
+
+      const autoRoundStartIndexes = buildAutoRoundStartIndexes({
+        exercise,
+        lowerBoundIndex,
+        playMode: currentPlayMode,
+        startNoteIndex,
+        upperBoundIndex,
+      });
+
+      if (!autoRoundStartIndexes) {
+        setPlaybackError(
+          `当前模式会在 ${lowerBoundNote} 到 ${upperBoundNote} 范围内折返，请换一个起始音。`,
+        );
+        return;
+      }
+
+      roundStartIndexes = autoRoundStartIndexes;
+    }
+
     stopPlayback();
+    setPlaybackError(null);
     setPendingExerciseId(null);
+    setExerciseStartNote(startNote);
 
     // 每次启动新的播放任务都生成新的 runId，旧任务会在下一次检查时自动退出。
     const runId = playbackRunIdRef.current + 1;
     playbackRunIdRef.current = runId;
     setActiveExerciseId(exercise.id);
 
-    let currentStartIndex = startNoteIndex;
-
     try {
-      while (isRunActive(runId)) {
+      for (const [roundIndex, roundStartIndex] of roundStartIndexes.entries()) {
+        if (!isRunActive(runId)) {
+          break;
+        }
+
         for (const step of exercise.steps) {
           if (!isRunActive(runId)) {
             break;
           }
 
-          const totalIndex = currentStartIndex + step.interval;
+          const totalIndex = roundStartIndex + step.interval;
           const fullNote = buildNoteFromChromaticIndex(totalIndex);
           const stepDurationMs = getStepDurationMs(step.beats, bpmRef.current);
           const noteDurationSeconds = getStepNoteDurationSeconds(stepDurationMs);
@@ -170,18 +262,19 @@ export default function useExercisePlayback(
           await wait(stepDurationMs);
         }
 
-        if (!isRunActive(runId) || playModeRef.current === 'once') {
-          break;
+        const nextRoundStartIndex = roundStartIndexes[roundIndex + 1];
+
+        // 到达折返点后，直接把界面模式同步切到返程方向，避免 UI 仍停留在旧方向上造成误解。
+        if (currentPlayMode === 'up' && nextRoundStartIndex !== undefined && nextRoundStartIndex < roundStartIndex) {
+          setCurrentPlayMode('down');
         }
 
-        if (playModeRef.current === 'up') {
-          currentStartIndex += 1;
-        } else if (playModeRef.current === 'down') {
-          currentStartIndex -= 1;
+        if (currentPlayMode === 'down' && nextRoundStartIndex !== undefined && nextRoundStartIndex > roundStartIndex) {
+          setCurrentPlayMode('up');
         }
 
-        // 超出当前采样可播放范围后停止，避免继续生成不可用音名。
-        if (!isPlayableIndex(currentStartIndex)) {
+        // 最后一轮已经回到用户选择的起始音，不再追加额外等待或新一轮推进。
+        if (!isRunActive(runId) || roundIndex === roundStartIndexes.length - 1) {
           break;
         }
 
@@ -205,6 +298,7 @@ export default function useExercisePlayback(
     }
 
     setSelectedExerciseId(nextExercise.id);
+    setPlaybackError(null);
     stopPlayback();
     setPendingExerciseId(null);
   }
@@ -222,6 +316,7 @@ export default function useExercisePlayback(
       return;
     }
 
+    setPlaybackError(null);
     armExercise(selectedExercise);
   }
 
@@ -230,14 +325,19 @@ export default function useExercisePlayback(
       activeExerciseId,
       bpm,
       isSamplerReady: sampler.isSamplerReady,
+      lowerBoundNote,
       pendingExerciseId,
       playMode,
+      playbackError,
       selectedExercise,
       selectedExerciseId,
+      upperBoundNote,
       onBpmChange: handleBpmChange,
       onExerciseChange: handleExerciseChange,
+      onLowerBoundNoteChange: handleLowerBoundNoteChange,
       onPrimaryAction: handlePrimaryAction,
       onToggleMode: toggleMode,
+      onUpperBoundNoteChange: handleUpperBoundNoteChange,
     },
     piano: {
       disabled: !sampler.isSamplerReady,
@@ -245,6 +345,7 @@ export default function useExercisePlayback(
       onNoteUp: handleNoteUp,
       pressedNotes: autoCurrentNote ? [autoCurrentNote] : [],
       followNote: autoCurrentNote,
+      startNoteMarker: exerciseStartNote,
     },
   };
 }
