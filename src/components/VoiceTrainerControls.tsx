@@ -36,7 +36,7 @@ type ExerciseVisualStatus = 'active' | 'pending' | 'idle';
 export interface VoiceTrainerControlsProps {
   activeExerciseId: string | null;
   bpm: number;
-  isSamplerReady: boolean;
+  isPlayerReady: boolean;
   lowerBoundNote: string;
   pendingExerciseId: string | null;
   playMode: PlayMode;
@@ -166,7 +166,7 @@ function getPendingHint(playMode: PlayMode, lowerBoundNote: string, upperBoundNo
 export default function VoiceTrainerControls({
   activeExerciseId,
   bpm,
-  isSamplerReady,
+  isPlayerReady,
   lowerBoundNote,
   pendingExerciseId,
   playMode,
@@ -460,7 +460,7 @@ export default function VoiceTrainerControls({
               当前练习音域：{lowerBoundNote} 到 {upperBoundNote}
             </Typography>
           )}
-          {!isSamplerReady && (
+          {!isPlayerReady && (
             <Typography sx={{ mt: 0.6, fontSize: '0.68rem', fontWeight: 900, color: '#ff0064' }}>
               音色加载中，请稍候后再按键盘开始
             </Typography>

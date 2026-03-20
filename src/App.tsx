@@ -5,14 +5,14 @@ import Paper from "@mui/material/Paper";
 import MangaPiano from "./components/MangaPiano.tsx";
 import VoiceTrainerControls from "./components/VoiceTrainerControls.tsx";
 import useExercisePlayback from "./hooks/useExercisePlayback.ts";
-import useManagedSampler from "./hooks/useManagedSampler.ts";
+import useManagedPlayer from "./hooks/useManagedPlayer.ts";
 import { Typography } from "@mui/material";
 
 export default function App(): ReactElement {
   // 页面层直接组合“音频能力”和“练习状态机”两个核心 hook，
   // 少一层只做转发的包装，阅读路径会更短。
-  const sampler = useManagedSampler();
-  const { controls, piano } = useExercisePlayback(sampler);
+  const { isPlayerReady, player } = useManagedPlayer();
+  const { controls, piano } = useExercisePlayback(player, isPlayerReady);
 
   return (
     <Box

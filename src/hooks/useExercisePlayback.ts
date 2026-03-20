@@ -8,33 +8,81 @@ import {
   type PlayMode,
 } from '../config/voiceTrainerExercises.ts';
 import type { Exercise } from '../config/voiceTrainerExercises.ts';
-import type { ManagedSamplerController } from './useManagedSampler.ts';
 import {
-  buildAutoRoundStartIndexes,
-  buildNoteFromChromaticIndex,
   DEFAULT_LOWER_BOUND_NOTE,
   DEFAULT_UPPER_BOUND_NOTE,
   getNextPlayMode,
-  getStepDurationMs,
-  getStepNoteDurationSeconds,
-  isExerciseStartIndexPlayable,
   parseNoteToChromaticIndex,
   shouldPickStartNote,
-  wait,
 } from '../utils/voiceTrainerPlaybackUtils.ts';
+import {
+  buildExercisePlaybackSequence,
+  ExerciseSequencePlannerError,
+} from '../audio/exerciseSequencePlanner.ts';
+import type { PlaybackEvent, PlaybackSequence, PlayerAdapter } from '../audio/playerAdapter.ts';
 
 export interface UseExercisePlaybackResult {
   controls: VoiceTrainerControlsProps;
   piano: MangaPianoProps;
 }
 
+interface ActivePlaybackRuntime {
+  sequence: PlaybackSequence;
+  roundLeadNoteIndexes: Map<number, number>;
+}
+
+function getPlannerErrorMessage(
+  error: ExerciseSequencePlannerError,
+  lowerBoundNote: string,
+  upperBoundNote: string,
+): string {
+  switch (error.code) {
+    case 'invalid-start-note':
+      return '当前起始音无法识别，请换一个键再试。';
+    case 'invalid-boundary-note':
+      return '练习音域配置异常，请重新调整最低音和最高音。';
+    case 'start-note-out-of-range':
+      return '这个起始音超出当前练习的可播放范围，请换一个更合适的音。';
+    case 'round-trip-out-of-range':
+      return `当前模式会在 ${lowerBoundNote} 到 ${upperBoundNote} 范围内折返，请换一个起始音。`;
+    default:
+      return error.message;
+  }
+}
+
+function getPlaybackFailureMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return '播放器执行失败，请稍后重试。';
+}
+
+function buildSequenceRoundLeadNoteIndexes(sequence: PlaybackSequence): Map<number, number> {
+  const roundLeadNoteIndexes = new Map<number, number>();
+
+  for (const step of sequence.steps) {
+    if (step.stepIndex !== 0 || roundLeadNoteIndexes.has(step.roundIndex)) {
+      continue;
+    }
+
+    const noteIndex = parseNoteToChromaticIndex(step.note);
+    if (noteIndex !== null) {
+      roundLeadNoteIndexes.set(step.roundIndex, noteIndex);
+    }
+  }
+
+  return roundLeadNoteIndexes;
+}
+
 export default function useExercisePlayback(
-  sampler: ManagedSamplerController,
+  player: PlayerAdapter,
+  isPlayerReady: boolean,
 ): UseExercisePlaybackResult {
-  const playbackRunIdRef = useRef(0);
   const playModeRef = useRef<PlayMode>(DEFAULT_PLAY_MODE);
-  const bpmRef = useRef(DEFAULT_BPM);
   const manualHeldNoteRef = useRef<string | null>(null);
+  const activePlaybackRef = useRef<ActivePlaybackRuntime | null>(null);
+  const lastStartedRoundIndexRef = useRef<number | null>(null);
 
   const [autoCurrentNote, setAutoCurrentNote] = useState<string | null>(null);
   const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
@@ -57,9 +105,22 @@ export default function useExercisePlayback(
     [pendingExerciseId],
   );
 
-  // 通过 runId 取消旧的异步播放循环，防止切换练习后出现多个循环并发。
-  function isRunActive(runId: number): boolean {
-    return playbackRunIdRef.current === runId;
+  useEffect(() => {
+    playModeRef.current = playMode;
+  }, [playMode]);
+
+  useEffect(() => {
+    return () => {
+      manualHeldNoteRef.current = null;
+    };
+  }, []);
+
+  function clearAutoPlaybackState(): void {
+    activePlaybackRef.current = null;
+    lastStartedRoundIndexRef.current = null;
+    setAutoCurrentNote(null);
+    setActiveExerciseId(null);
+    setExerciseStartNote(null);
   }
 
   function armExercise(exercise: Exercise | undefined): void {
@@ -78,26 +139,109 @@ export default function useExercisePlayback(
     setPendingExerciseId(null);
   }
 
-  function clearAutoPlaybackState(): void {
-    setAutoCurrentNote(null);
-    setActiveExerciseId(null);
-    setExerciseStartNote(null);
+  function setCurrentPlayMode(nextMode: PlayMode): void {
+    playModeRef.current = nextMode;
+    setPlayMode(nextMode);
   }
 
-  function stopPlayback(): void {
-    playbackRunIdRef.current += 1;
-    clearAutoPlaybackState();
+  async function ensurePlayerReady(): Promise<boolean> {
+    if (player.isReady()) {
+      return true;
+    }
 
-    // 这里主动 release，保证停止时不会残留长音或高亮状态。
-    void sampler.releaseAll();
+    try {
+      await player.prepare();
+      return player.isReady();
+    } catch (error) {
+      setPlaybackError(getPlaybackFailureMessage(error));
+      return false;
+    }
+  }
+
+  async function stopPlayback(): Promise<void> {
+    try {
+      await player.stop();
+      await player.releaseAll();
+    } catch (error) {
+      setPlaybackError(getPlaybackFailureMessage(error));
+      clearAutoPlaybackState();
+    }
   }
 
   useEffect(() => {
+    function syncRoundTripDirection(event: Extract<PlaybackEvent, { type: 'noteStart' }>): void {
+      if (event.stepIndex !== 0) {
+        return;
+      }
+
+      const activePlayback = activePlaybackRef.current;
+      if (!activePlayback) {
+        return;
+      }
+
+      if (activePlayback.sequence.playMode === 'once') {
+        return;
+      }
+
+      if (lastStartedRoundIndexRef.current === event.roundIndex) {
+        return;
+      }
+
+      const previousRoundIndex = lastStartedRoundIndexRef.current;
+      lastStartedRoundIndexRef.current = event.roundIndex;
+
+      if (previousRoundIndex === null) {
+        return;
+      }
+
+      const previousRoundLeadNoteIndex =
+        activePlayback.roundLeadNoteIndexes.get(previousRoundIndex) ?? null;
+      const currentRoundLeadNoteIndex =
+        activePlayback.roundLeadNoteIndexes.get(event.roundIndex) ?? null;
+
+      if (previousRoundLeadNoteIndex === null || currentRoundLeadNoteIndex === null) {
+        return;
+      }
+
+      // 播放方向仍由 hook 维护，adapter 只汇报“当前播到了哪一轮的第几个 step”。
+      if (
+        activePlayback.sequence.playMode === 'up' &&
+        currentRoundLeadNoteIndex < previousRoundLeadNoteIndex
+      ) {
+        setCurrentPlayMode('down');
+      }
+
+      if (
+        activePlayback.sequence.playMode === 'down' &&
+        currentRoundLeadNoteIndex > previousRoundLeadNoteIndex
+      ) {
+        setCurrentPlayMode('up');
+      }
+    }
+
+    const unsubscribe = player.subscribe((event) => {
+      switch (event.type) {
+        case 'noteStart':
+          setAutoCurrentNote(event.note);
+          syncRoundTripDirection(event);
+          break;
+        case 'sequenceComplete':
+        case 'stopped':
+          clearAutoPlaybackState();
+          break;
+        case 'error':
+          setPlaybackError(event.error.message);
+          clearAutoPlaybackState();
+          break;
+        default:
+          break;
+      }
+    });
+
     return () => {
-      playbackRunIdRef.current += 1;
-      manualHeldNoteRef.current = null;
+      unsubscribe();
     };
-  }, []);
+  }, [player]);
 
   function toggleMode(): void {
     setPlaybackError(null);
@@ -108,13 +252,7 @@ export default function useExercisePlayback(
     });
   }
 
-  function setCurrentPlayMode(nextMode: PlayMode): void {
-    playModeRef.current = nextMode;
-    setPlayMode(nextMode);
-  }
-
   function handleBpmChange(nextBpm: number): void {
-    bpmRef.current = nextBpm;
     setBpm(nextBpm);
   }
 
@@ -133,7 +271,7 @@ export default function useExercisePlayback(
 
     setLowerBoundNote(nextLowerBoundNote);
     setPlaybackError(null);
-    stopPlayback();
+    void stopPlayback();
   }
 
   function handleUpperBoundNoteChange(nextUpperBoundNote: string): void {
@@ -151,7 +289,7 @@ export default function useExercisePlayback(
 
     setUpperBoundNote(nextUpperBoundNote);
     setPlaybackError(null);
-    stopPlayback();
+    void stopPlayback();
   }
 
   function handleNoteDown(note: string): void {
@@ -161,9 +299,7 @@ export default function useExercisePlayback(
       return;
     }
 
-    setPlaybackError(null);
-    manualHeldNoteRef.current = note;
-    void sampler.triggerAttack(note);
+    void startManualNote(note);
   }
 
   function handleNoteUp(note: string): void {
@@ -172,119 +308,84 @@ export default function useExercisePlayback(
     }
 
     manualHeldNoteRef.current = null;
-    void sampler.triggerRelease(note);
+    void player.stopNote(note).catch((error: unknown) => {
+      setPlaybackError(getPlaybackFailureMessage(error));
+    });
   }
 
-  async function playExercise(exercise: Exercise, startNote: string): Promise<void> {
-    if (!sampler.isReady()) {
+  async function startManualNote(note: string): Promise<void> {
+    manualHeldNoteRef.current = note;
+
+    if (!(await ensurePlayerReady())) {
+      manualHeldNoteRef.current = null;
       return;
     }
 
-    const startNoteIndex = parseNoteToChromaticIndex(startNote);
-    if (startNoteIndex === null) {
-      setPlaybackError('当前起始音无法识别，请换一个键再试。');
+    // 如果用户在 prepare 或 adapter 停止旧流程期间已经松手，就不要再补 attack。
+    if (manualHeldNoteRef.current !== note) {
+      return;
+    }
+
+    setPlaybackError(null);
+
+    try {
+      await player.startNote(note);
+    } catch (error) {
+      if (manualHeldNoteRef.current === note) {
+        manualHeldNoteRef.current = null;
+      }
+
+      setPlaybackError(getPlaybackFailureMessage(error));
+    }
+  }
+
+  async function playExercise(exercise: Exercise, startNote: string): Promise<void> {
+    if (!(await ensurePlayerReady())) {
       return;
     }
 
     if (activeExerciseId === exercise.id) {
-      stopPlayback();
-      return;
-    }
-
-    // 单次模式也需要先确认整条练习能完整落在采样可播放区间里。
-    if (!isExerciseStartIndexPlayable(exercise, startNoteIndex)) {
-      setPlaybackError('这个起始音超出当前练习的可播放范围，请换一个更合适的音。');
+      await stopPlayback();
       return;
     }
 
     const currentPlayMode = playModeRef.current;
-    const lowerBoundIndex = parseNoteToChromaticIndex(lowerBoundNote);
-    const upperBoundIndex = parseNoteToChromaticIndex(upperBoundNote);
-    let roundStartIndexes = [startNoteIndex];
+    let sequence: PlaybackSequence;
 
-    if (currentPlayMode === 'up' || currentPlayMode === 'down') {
-      if (lowerBoundIndex === null || upperBoundIndex === null) {
-        setPlaybackError('练习音域配置异常，请重新调整最低音和最高音。');
-        return;
-      }
-
-      const autoRoundStartIndexes = buildAutoRoundStartIndexes({
+    try {
+      sequence = buildExercisePlaybackSequence({
         exercise,
-        lowerBoundIndex,
+        startNote,
         playMode: currentPlayMode,
-        startNoteIndex,
-        upperBoundIndex,
+        bpm,
+        lowerBoundNote,
+        upperBoundNote,
       });
-
-      if (!autoRoundStartIndexes) {
-        setPlaybackError(
-          `当前模式会在 ${lowerBoundNote} 到 ${upperBoundNote} 范围内折返，请换一个起始音。`,
-        );
+    } catch (error) {
+      if (error instanceof ExerciseSequencePlannerError) {
+        setPlaybackError(getPlannerErrorMessage(error, lowerBoundNote, upperBoundNote));
         return;
       }
 
-      roundStartIndexes = autoRoundStartIndexes;
+      setPlaybackError(getPlaybackFailureMessage(error));
+      return;
     }
 
-    stopPlayback();
+    await stopPlayback();
     setPlaybackError(null);
     setPendingExerciseId(null);
     setExerciseStartNote(startNote);
-
-    // 每次启动新的播放任务都生成新的 runId，旧任务会在下一次检查时自动退出。
-    const runId = playbackRunIdRef.current + 1;
-    playbackRunIdRef.current = runId;
+    activePlaybackRef.current = {
+      sequence,
+      roundLeadNoteIndexes: buildSequenceRoundLeadNoteIndexes(sequence),
+    };
+    lastStartedRoundIndexRef.current = null;
     setActiveExerciseId(exercise.id);
 
-    try {
-      for (const [roundIndex, roundStartIndex] of roundStartIndexes.entries()) {
-        if (!isRunActive(runId)) {
-          break;
-        }
-
-        for (const step of exercise.steps) {
-          if (!isRunActive(runId)) {
-            break;
-          }
-
-          const totalIndex = roundStartIndex + step.interval;
-          const fullNote = buildNoteFromChromaticIndex(totalIndex);
-          const stepDurationMs = getStepDurationMs(step.beats, bpmRef.current);
-          const noteDurationSeconds = getStepNoteDurationSeconds(stepDurationMs);
-
-          setAutoCurrentNote(fullNote);
-          await sampler.triggerAttackRelease(fullNote, noteDurationSeconds);
-
-          if (!isRunActive(runId)) {
-            break;
-          }
-
-          await wait(stepDurationMs);
-        }
-
-        const nextRoundStartIndex = roundStartIndexes[roundIndex + 1];
-
-        // 到达折返点后，直接把界面模式同步切到返程方向，避免 UI 仍停留在旧方向上造成误解。
-        if (currentPlayMode === 'up' && nextRoundStartIndex !== undefined && nextRoundStartIndex < roundStartIndex) {
-          setCurrentPlayMode('down');
-        }
-
-        if (currentPlayMode === 'down' && nextRoundStartIndex !== undefined && nextRoundStartIndex > roundStartIndex) {
-          setCurrentPlayMode('up');
-        }
-
-        // 最后一轮已经回到用户选择的起始音，不再追加额外等待或新一轮推进。
-        if (!isRunActive(runId) || roundIndex === roundStartIndexes.length - 1) {
-          break;
-        }
-
-        await wait(getStepDurationMs(1.25, bpmRef.current));
-      }
-    } finally {
-      if (playbackRunIdRef.current === runId) {
-        clearAutoPlaybackState();
-      }
-    }
+    void player.playSequence(sequence).catch((error: unknown) => {
+      setPlaybackError(getPlaybackFailureMessage(error));
+      clearAutoPlaybackState();
+    });
   }
 
   function handleExerciseChange(nextExerciseId: string): void {
@@ -299,13 +400,13 @@ export default function useExercisePlayback(
 
     setSelectedExerciseId(nextExercise.id);
     setPlaybackError(null);
-    stopPlayback();
+    void stopPlayback();
     setPendingExerciseId(null);
   }
 
   function handlePrimaryAction(): void {
     if (activeExerciseId !== null) {
-      stopPlayback();
+      void stopPlayback();
       if (selectedExercise) {
         armExercise(selectedExercise);
       }
@@ -324,7 +425,7 @@ export default function useExercisePlayback(
     controls: {
       activeExerciseId,
       bpm,
-      isSamplerReady: sampler.isSamplerReady,
+      isPlayerReady,
       lowerBoundNote,
       pendingExerciseId,
       playMode,
@@ -340,7 +441,7 @@ export default function useExercisePlayback(
       onUpperBoundNoteChange: handleUpperBoundNoteChange,
     },
     piano: {
-      disabled: !sampler.isSamplerReady,
+      disabled: !isPlayerReady,
       onNoteDown: handleNoteDown,
       onNoteUp: handleNoteUp,
       pressedNotes: autoCurrentNote ? [autoCurrentNote] : [],

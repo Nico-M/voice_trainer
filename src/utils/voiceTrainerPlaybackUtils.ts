@@ -67,9 +67,13 @@ export function getStepDurationMs(beats: number, bpm: number): number {
   return (60000 / bpm) * beats;
 }
 
+export function getStepNoteDurationMs(stepDurationMs: number): number {
+  return Math.max(stepDurationMs * 0.97, 180);
+}
+
 // 时值略小于整步长，给相邻音一点点呼吸空间，避免采样重叠过脏。
 export function getStepNoteDurationSeconds(stepDurationMs: number): number {
-  return Math.max(stepDurationMs * 0.001 * 0.97, 0.18);
+  return getStepNoteDurationMs(stepDurationMs) * 0.001;
 }
 
 export function buildNoteFromChromaticIndex(totalIndex: number): string {
