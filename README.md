@@ -98,12 +98,14 @@
 
 - `src/App.tsx`
   页面入口与布局组装
-- `src/hooks/useManagedSampler.ts`
-  `Sampler` 生命周期管理
+- `src/hooks/useManagedPlayer.ts`
+  `TonePlayerAdapter` 生命周期管理与注入
 - `src/hooks/useExercisePlayback.ts`
   练习播放状态机
 - `src/audio/sampler.ts`
   对 `Tone.Sampler` 的封装
+- `src/audio/tonePlayerAdapter.ts`
+  H5 播放执行器与事件回调
 
 ## 安装与运行
 
@@ -131,6 +133,18 @@ npm run build
 
 ```bash
 npm run preview
+```
+
+### 5. 同步到 Capacitor Android 壳
+
+```bash
+npm run cap:sync:android
+```
+
+首次接入后如需打开 Android Studio：
+
+```bash
+npm run cap:open:android
 ```
 
 ## 使用方法
