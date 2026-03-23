@@ -11,6 +11,7 @@ import { wait } from '../utils/voiceTrainerPlaybackUtils.ts';
 interface TonePlayerSampler {
   loaded: boolean;
   ready(): Promise<void>;
+  startAudioContext(): Promise<void>;
   triggerAttackRelease(note: string, durationSeconds: number): Promise<void>;
   triggerAttack(note: string): Promise<void>;
   triggerRelease(note: string): Promise<void>;
@@ -100,6 +101,7 @@ export default class TonePlayerAdapter implements PlayerAdapter {
   }
 
   async startNote(note: string): Promise<void> {
+    await this.sampler.startAudioContext();
     await this.prepare();
     await this.stop();
     await this.sampler.triggerAttack(note);
@@ -114,14 +116,13 @@ export default class TonePlayerAdapter implements PlayerAdapter {
   }
 
   async playSequence(sequence: PlaybackSequence): Promise<void> {
+    await this.sampler.startAudioContext();
     await this.prepare();
     await this.stop();
 
     const runId = this.activeSequenceRunId + 1;
     this.activeSequenceRunId = runId;
     this.activeSequenceTask = this.runSequence(runId, sequence);
-
-    return this.activeSequenceTask;
   }
 
   async stop(): Promise<void> {

@@ -1,14 +1,66 @@
 import { useEffect, useRef, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import NativePlayerAdapter from '../audio/nativePlayerAdapter.ts';
 import type { PlayerAdapter } from '../audio/playerAdapter.ts';
 import TonePlayerAdapter from '../audio/tonePlayerAdapter.ts';
 
+export type PlayerBackendKind = 'android-native-sequence' | 'tonejs-web-audio';
+
+export interface PlayerBackendInfo {
+  description: string;
+  isNative: boolean;
+  kind: PlayerBackendKind;
+  label: string;
+}
+
 export interface ManagedPlayerController {
+  backend: PlayerBackendInfo;
   isPlayerReady: boolean;
   player: PlayerAdapter;
 }
 
+interface ManagedPlayerSelection {
+  backend: PlayerBackendInfo;
+  player: PlayerAdapter;
+}
+
+function getPlayerBackendInfo(platform: string): PlayerBackendInfo {
+  if (platform === 'android') {
+    return {
+      description: '正式练习与手动试音都由 Android NativeAudio sequence 链路执行。',
+      isNative: true,
+      kind: 'android-native-sequence',
+      label: 'Android NativeAudio',
+    };
+  }
+
+  return {
+    description: '当前环境继续走 Tone.js + Web Audio 调度链路。',
+    isNative: false,
+    kind: 'tonejs-web-audio',
+    label: 'Tone.js Web Audio',
+  };
+}
+
+function createManagedPlayer(): ManagedPlayerSelection {
+  const platform = Capacitor.getPlatform();
+
+  // 目前只有 Android 原生 sequence 实现可用，其他环境继续走 H5 adapter。
+  if (platform === 'android') {
+    return {
+      backend: getPlayerBackendInfo(platform),
+      player: new NativePlayerAdapter(),
+    };
+  }
+
+  return {
+    backend: getPlayerBackendInfo(platform),
+    player: new TonePlayerAdapter(),
+  };
+}
+
 export default function useManagedPlayer(): ManagedPlayerController {
-  const [player] = useState<PlayerAdapter>(() => new TonePlayerAdapter());
+  const [{ backend, player }] = useState<ManagedPlayerSelection>(createManagedPlayer);
   const [isPlayerReady, setIsPlayerReady] = useState(player.isReady());
   const disposeTimerRef = useRef<number | null>(null);
 
@@ -51,7 +103,7 @@ export default function useManagedPlayer(): ManagedPlayerController {
 
         void player.stop().finally(() => {
           void player.releaseAll().finally(() => {
-            player.dispose();
+            void Promise.resolve(player.dispose()).catch(() => undefined);
           });
         });
       }, 0);
@@ -59,6 +111,7 @@ export default function useManagedPlayer(): ManagedPlayerController {
   }, [player]);
 
   return {
+    backend,
     isPlayerReady,
     player,
   };

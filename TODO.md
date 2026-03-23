@@ -1510,6 +1510,22 @@ Android 原生侧打算怎么获得类似 Tone.Sampler 的“中间音高能力�
 
 ## 阶段 5：把"自动练习"改成序列下发
 
+### 当前状态
+
+- 已完成主链路迁移：自动练习已经改成“前端生成 `PlaybackSequence`，Android 原生执行 sequence”
+- 正式练习在 Android 环境下已经通过 `NativePlayerAdapter -> Capacitor NativeAudio -> NativeAudioEngine` 执行
+- `once / up / down` 三种模式已可用
+- `stopSequence()` 已接入正式停止链路
+- 手动试音与自动练习已按“策略 A：手动试音优先，直接打断当前自动 sequence”工作
+
+### 已知限制
+
+- Android 原生 sequence 当前使用 `Handler.postDelayed()` 调度，阶段 5 接受可感知但可接受的时序误差
+- Native -> JS 的事件回传存在 bridge 开销，UI 高亮目前以“主观可用”为准，`< 50ms` 目标尚未做正式量化验收
+- 当前 native sample fallback 的稳定可用音域为 `C1 - C8`
+- `A0 / A#0 / B0` 超出当前 `SoundPool` 变调下限，不在本阶段支持范围内
+- 前端 sequence 中的 `durationMs / noteDurationMs` 允许保留小数；Android 插件当前按整数毫秒解析，存在可接受的取整误差
+
 ### 目标
 
 让前端不再自己逐音 `wait + trigger`，而是把一整条练习序列交给原生

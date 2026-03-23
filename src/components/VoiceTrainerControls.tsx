@@ -228,7 +228,7 @@ export default function VoiceTrainerControls({
       <Box sx={{ mb: 1, px: 0.5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 1, mb: 1 }}>
           <Typography variant="caption" sx={{ fontWeight: 900, textTransform: 'uppercase', fontSize: '1rem' }}>
-            WARM-UP SCALES
+            热身
           </Typography>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <ButtonBase onClick={onToggleMode}>

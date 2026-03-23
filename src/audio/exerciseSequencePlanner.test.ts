@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getExerciseById } from '../config/voiceTrainerExercises.ts';
+import { getStepNoteDurationMs } from '../utils/voiceTrainerPlaybackUtils.ts';
 import {
   buildExercisePlaybackSequence,
   ExerciseSequencePlannerError,
@@ -95,7 +96,13 @@ describe('buildExercisePlaybackSequence', () => {
     expect(sequence.steps).toHaveLength(5);
     expect(sequence.steps.map((step) => step.note)).toEqual(['C4', 'D4', 'E4', 'D4', 'C4']);
     expect(sequence.steps.map((step) => step.durationMs)).toEqual([500, 500, 500, 500, 1000]);
-    expect(sequence.steps.map((step) => step.noteDurationMs)).toEqual([485, 485, 485, 485, 970]);
+    expect(sequence.steps.map((step) => step.noteDurationMs)).toEqual([
+      getStepNoteDurationMs(500),
+      getStepNoteDurationMs(500),
+      getStepNoteDurationMs(500),
+      getStepNoteDurationMs(500),
+      getStepNoteDurationMs(1000),
+    ]);
     expect(sequence.steps.map((step) => step.roundIndex)).toEqual([0, 0, 0, 0, 0]);
     expect(sequence.steps.map((step) => step.stepIndex)).toEqual([0, 1, 2, 3, 4]);
   });
@@ -157,7 +164,7 @@ describe('buildExercisePlaybackSequence', () => {
 
     expect(slowSequence.steps[0]?.durationMs).toBe(1000);
     expect(fastSequence.steps[0]?.durationMs).toBe(500);
-    expect(slowSequence.steps[0]?.noteDurationMs).toBe(970);
-    expect(fastSequence.steps[0]?.noteDurationMs).toBe(485);
+    expect(slowSequence.steps[0]?.noteDurationMs).toBe(getStepNoteDurationMs(1000));
+    expect(fastSequence.steps[0]?.noteDurationMs).toBe(getStepNoteDurationMs(500));
   });
 });

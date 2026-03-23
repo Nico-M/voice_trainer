@@ -22,6 +22,9 @@ function createMockSampler() {
   return {
     sampler: {
       loaded: true,
+      async startAudioContext(): Promise<void> {
+        return Promise.resolve();
+      },
       async ready(): Promise<void> {
         return Promise.resolve();
       },
@@ -62,13 +65,21 @@ describe('TonePlayerAdapter', () => {
     const { sampler, calls } = createMockSampler();
     const waitMs = vi.fn(async () => Promise.resolve());
     const events: PlaybackEvent[] = [];
+    let resolveComplete!: () => void;
+    const sequenceComplete = new Promise<void>((resolve) => {
+      resolveComplete = resolve;
+    });
     const adapter = new TonePlayerAdapter({ sampler, waitMs });
 
     adapter.subscribe((event) => {
       events.push(event);
+      if (event.type === 'sequenceComplete') {
+        resolveComplete();
+      }
     });
 
     await adapter.playSequence(createSequence());
+    await sequenceComplete;
 
     expect(waitMs).toHaveBeenCalledTimes(2);
     expect(calls.attackRelease).toEqual([
@@ -98,7 +109,7 @@ describe('TonePlayerAdapter', () => {
       events.push(event);
     });
 
-    const playbackTask = adapter.playSequence(createSequence());
+    await adapter.playSequence(createSequence());
     while (waitMs.mock.calls.length === 0) {
       await Promise.resolve();
     }
@@ -107,7 +118,7 @@ describe('TonePlayerAdapter', () => {
     if (releaseWait !== undefined) {
       releaseWait();
     }
-    await playbackTask;
+    await Promise.resolve();
 
     expect(calls.releaseAllCount).toBe(1);
     expect(calls.attack).toEqual(['E4']);

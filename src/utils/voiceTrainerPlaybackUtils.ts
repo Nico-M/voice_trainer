@@ -6,6 +6,8 @@ import {
 } from '../config/voiceTrainerExercises.ts';
 
 const PLAY_MODE_SEQUENCE: PlayMode[] = ['once', 'up', 'down'];
+export const AUTO_PLAY_NOTE_GATE_RATIO = 0.995;
+export const AUTO_PLAY_NOTE_MIN_DURATION_MS = 180;
 export const DEFAULT_LOWER_BOUND_NOTE = 'C3';
 export const DEFAULT_UPPER_BOUND_NOTE = 'C5';
 export const MIN_BOUNDARY_NOTE = 'C2';
@@ -68,7 +70,8 @@ export function getStepDurationMs(beats: number, bpm: number): number {
 }
 
 export function getStepNoteDurationMs(stepDurationMs: number): number {
-  return Math.max(stepDurationMs * 0.97, 180);
+  // gate 越接近 1，相邻两个自动播放音符之间的留白越小。
+  return Math.max(stepDurationMs * AUTO_PLAY_NOTE_GATE_RATIO, AUTO_PLAY_NOTE_MIN_DURATION_MS);
 }
 
 // 时值略小于整步长，给相邻音一点点呼吸空间，避免采样重叠过脏。

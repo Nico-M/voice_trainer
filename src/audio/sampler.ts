@@ -76,14 +76,18 @@ export class MySampler {
     await this.readyPromise;
   }
 
+  async startAudioContext(): Promise<void> {
+    // 必须尽量在真实用户手势的调用栈起点就触发 Tone.start()，
+    // 否则经过多层 await 之后，浏览器可能不再把它视为可解锁音频的交互。
+    await start();
+  }
+
   async triggerAttackRelease(
     notes: TriggerAttackReleaseNotes,
     duration: TriggerAttackReleaseDuration = '8n',
     time?: TriggerTime,
     velocity?: TriggerVelocity,
   ): Promise<void> {
-    // 浏览器里首次播放前需要用户手势触发 AudioContext。
-    await start();
     await this.ready();
     this.sampler.triggerAttackRelease(notes, duration, time, velocity);
   }
@@ -93,7 +97,6 @@ export class MySampler {
     time?: TriggerTime,
     velocity?: TriggerVelocity,
   ): Promise<void> {
-    await start();
     await this.ready();
     this.sampler.triggerAttack(notes, time, velocity);
   }

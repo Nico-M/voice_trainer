@@ -1,13 +1,13 @@
 # Voice Trainer
 
-一个基于 `React + Vite + TypeScript + Material UI + Tone.js` 的移动端练声原型项目。
+一个基于 `React + Vite + TypeScript + Material UI + Tone.js + Capacitor` 的移动端练声原型项目。
 
-项目当前重点是提供一个适合手机使用的音阶练习界面：上方选择练习与速度，下方使用 `Canvas` 渲染漫画风钢琴键盘，并通过采样钢琴音色完成播放与手动试音。
+项目当前重点是提供一个适合手机使用的音阶练习界面：上方选择练习与速度，下方使用 `Canvas` 渲染漫画风钢琴键盘，并通过采样钢琴音色完成播放与手动试音。浏览器环境继续走 `Tone.js`，Android 容器内则会切到 `NativePlayerAdapter -> Capacitor NativeAudio -> Android NativeAudioEngine`。
 
 ## 项目特点
 
 - 面向移动端的单页练声界面
-- 基于 `Tone.Sampler` 的钢琴采样播放
+- 浏览器环境基于 `Tone.Sampler`，Android 环境支持原生 sequence 播放
 - 支持多组预设音阶练习
 - 练习开始前由用户自己选择起始音
 - 支持 `单次循环 / 自动上行 / 自动下行` 三种播放模式
@@ -76,6 +76,7 @@
 - `TypeScript 5`
 - `Material UI 7`
 - `Tone.js`
+- `Capacitor`
 
 ### 目录说明
 
@@ -97,15 +98,19 @@
 ### 关键文件
 
 - `src/App.tsx`
-  页面入口与布局组装
+  页面入口、布局组装与当前播放后端展示
 - `src/hooks/useManagedPlayer.ts`
-  `TonePlayerAdapter` 生命周期管理与注入
+  根据运行平台选择 `NativePlayerAdapter` 或 `TonePlayerAdapter`
 - `src/hooks/useExercisePlayback.ts`
   练习播放状态机
+- `src/audio/nativePlayerAdapter.ts`
+  Android 原生播放执行器与事件桥接
 - `src/audio/sampler.ts`
   对 `Tone.Sampler` 的封装
 - `src/audio/tonePlayerAdapter.ts`
   H5 播放执行器与事件回调
+- `src/native/nativeAudioPlugin.ts`
+  Capacitor NativeAudio 插件类型与调用封装
 
 ## 安装与运行
 
@@ -122,6 +127,8 @@ npm run dev
 ```
 
 启动后使用浏览器打开 Vite 提供的本地地址即可。
+
+浏览器开发环境会显示当前正式播放后端为 `Tone.js Web Audio`。
 
 ### 3. 生产构建
 
@@ -146,6 +153,8 @@ npm run cap:sync:android
 ```bash
 npm run cap:open:android
 ```
+
+Android 真机或模拟器里，正式练习界面会显示当前正式播放后端为 `Android NativeAudio`。
 
 ## 使用方法
 

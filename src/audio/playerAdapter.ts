@@ -39,8 +39,8 @@ export interface PlayerAdapter {
   isReady(): boolean;
 
   /**
-   * 手动试音入口。若此时存在自动播放，调用方应先 stop 当前 sequence，
-   * 再把手动按键交给 adapter，避免留下隐性并发行为。
+   * 手动试音入口。若此时存在自动播放，adapter 内部必须先打断当前 sequence，
+   * 再响应手动输入，避免把并发冲突泄漏给上层 hook。
    */
   startNote(note: string): Promise<void>;
 
@@ -49,6 +49,8 @@ export interface PlayerAdapter {
   /**
    * 自动练习入口。sequence 的调度执行权完全归 adapter 所有，
    * 上层 hook 不能再偷偷保留逐音循环作为后门兜底。
+   * Promise 只表示“已成功受理开始执行”，播放完成 / 停止 / 运行期错误
+   * 必须统一通过 PlaybackEvent 回传，调用方不能拿 resolve 当完成信号。
    */
   playSequence(sequence: PlaybackSequence): Promise<void>;
 

@@ -10,17 +10,49 @@ import Select, { type SelectChangeEvent } from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { Capacitor } from "@capacitor/core";
+import type { PlaybackSequence } from "../audio/playerAdapter.ts";
+import { NOTE_NAMES } from "../config/voiceTrainerExercises.ts";
 import noteMapping from "../config/noteMapping.ts";
 import {
   NativeAudio,
   type NativeAudioErrorEvent,
   type NativeAudioNoteEvent,
+  type NativeStepStartEvent,
   type PrepareSamplesResult,
 } from "../native/nativeAudioPlugin.ts";
 
-const DEBUG_NOTE_OPTIONS = Object.keys(noteMapping);
-const DEFAULT_DEBUG_NOTE = DEBUG_NOTE_OPTIONS.includes("C4") ? "C4" : DEBUG_NOTE_OPTIONS[0];
+const MIN_DEBUG_NOTE_INDEX = 12;
+const MAX_DEBUG_NOTE_INDEX = 96;
+
+const DEBUG_NOTE_OPTIONS = Array.from(
+  { length: MAX_DEBUG_NOTE_INDEX - MIN_DEBUG_NOTE_INDEX + 1 },
+  (_, index) => {
+    const chromaticIndex = index + MIN_DEBUG_NOTE_INDEX;
+  const octave = Math.floor(chromaticIndex / 12);
+  const noteName = NOTE_NAMES[chromaticIndex % 12];
+  const note = `${noteName}${octave}`;
+
+  return {
+    hasDirectSample: Object.prototype.hasOwnProperty.call(noteMapping, note),
+    note,
+  };
+  },
+);
+const DEFAULT_DEBUG_NOTE = DEBUG_NOTE_OPTIONS.some((option) => option.note === "C4")
+  ? "C4"
+  : DEBUG_NOTE_OPTIONS[0]?.note ?? "C4";
 const MAX_LOG_LINES = 12;
+const DEMO_SEQUENCE: PlaybackSequence = {
+  bpm: 120,
+  startNote: "C4",
+  playMode: "once",
+  steps: [
+    { note: "C4", durationMs: 500, noteDurationMs: 485, stepIndex: 0, roundIndex: 0 },
+    { note: "E4", durationMs: 500, noteDurationMs: 485, stepIndex: 1, roundIndex: 0 },
+    { note: "G4", durationMs: 500, noteDurationMs: 485, stepIndex: 2, roundIndex: 0 },
+    { note: "C5", durationMs: 1000, noteDurationMs: 970, stepIndex: 3, roundIndex: 0 },
+  ],
+};
 
 function formatLogLine(label: string, detail: string): string {
   return `${new Date().toLocaleTimeString()} ${label}: ${detail}`;
@@ -59,9 +91,16 @@ function describeLoadedNotes(loadedNotes: string[]): string {
   return `${loadedNotes.slice(0, 8).join(", ")} ... 共 ${loadedNotes.length} 个`;
 }
 
-export default function NativeAudioDebugPanel() {
+interface NativeAudioDebugPanelProps {
+  formalPlaybackBackendLabel: string;
+}
+
+export default function NativeAudioDebugPanel({
+  formalPlaybackBackendLabel,
+}: NativeAudioDebugPanelProps) {
   const [isPreparing, setIsPreparing] = useState(false);
   const [isPrepared, setIsPrepared] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [selectedNote, setSelectedNote] = useState(DEFAULT_DEBUG_NOTE);
   const [prepareResult, setPrepareResult] = useState<PrepareSamplesResult | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -94,6 +133,20 @@ export default function NativeAudioDebugPanel() {
       }),
       NativeAudio.addListener("noteStarted", (event: NativeAudioNoteEvent) => {
         setLogs((currentLogs) => appendLog(currentLogs, formatLogLine("noteStarted", event.note)));
+      }),
+      NativeAudio.addListener("stepStart", (event: NativeStepStartEvent) => {
+        setLogs((currentLogs) =>
+          appendLog(
+            currentLogs,
+            formatLogLine("stepStart", `${event.note} step=${event.stepIndex} round=${event.roundIndex}`),
+          ),
+        );
+      }),
+      NativeAudio.addListener("sequenceComplete", () => {
+        setLogs((currentLogs) => appendLog(currentLogs, formatLogLine("sequenceComplete", "native sequence finished")));
+      }),
+      NativeAudio.addListener("stopped", () => {
+        setLogs((currentLogs) => appendLog(currentLogs, formatLogLine("stopped", "native sequence stopped")));
       }),
       NativeAudio.addListener("nativeError", (event: NativeAudioErrorEvent) => {
         setLastError(event.message);
@@ -171,6 +224,34 @@ export default function NativeAudioDebugPanel() {
     }
   }
 
+  async function handlePlaySequence(): Promise<void> {
+    setLastError(null);
+
+    try {
+      await NativeAudio.playSequence(DEMO_SEQUENCE);
+      setLogs((currentLogs) =>
+        appendLog(currentLogs, formatLogLine("playSequence", `queued ${DEMO_SEQUENCE.steps.length} demo steps`)),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "playSequence failed";
+      setLastError(message);
+      setLogs((currentLogs) => appendLog(currentLogs, formatLogLine("sequenceError", message)));
+    }
+  }
+
+  async function handleStopSequence(): Promise<void> {
+    setLastError(null);
+
+    try {
+      await NativeAudio.stopSequence();
+      setLogs((currentLogs) => appendLog(currentLogs, formatLogLine("stopSequence", "stop request sent")));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "stopSequence failed";
+      setLastError(message);
+      setLogs((currentLogs) => appendLog(currentLogs, formatLogLine("stopSequenceError", message)));
+    }
+  }
+
   if (!isAndroidNative) {
     return null;
   }
@@ -201,92 +282,124 @@ export default function NativeAudioDebugPanel() {
       </Stack>
 
       <Typography variant="caption" sx={{ display: "block", mb: 1 }}>
-        阶段 4 临时调试入口，只验证 Android 原生单音链路，不接正式练习流程。
+        阶段 4/5 原生调试入口，用来验证单音、sequence 和事件回传链路，不替代正式 UI。
+        当前正式练习后端是 {formalPlaybackBackendLabel}，调试里的 Sequence Demo 仍然只是硬编码样例，不跟正式练习模式联动。
+      </Typography>
+      <Typography variant="caption" sx={{ display: "block", mb: 1, color: "#333" }}>
+        当前调试音域已收窄到 `C1 - C8`。下拉框里带 `fallback` 的音，表示当前没有直采样，会走最近 sample 的变调补音。
       </Typography>
 
-      <Stack spacing={1}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: isExpanded ? 1 : 0 }}>
         <Button variant="contained" size="small" onClick={() => void handlePrepare()} disabled={isPreparing}>
           {isPreparing ? "Preparing" : "Prepare"}
         </Button>
-
-        <Stack direction="row" spacing={1} alignItems="stretch">
-          <FormControl fullWidth size="small">
-            <Select
-              value={selectedNote}
-              onChange={handleSelectedNoteChange}
-              disabled={!isPrepared}
-              sx={{
-                bgcolor: "#fff",
-                border: "2px solid #000",
-                borderRadius: "10px",
-                fontWeight: 900,
-              }}
-            >
-              {DEBUG_NOTE_OPTIONS.map((note) => (
-                <MenuItem key={note} value={note}>
-                  {note}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <Button
-            variant="outlined"
-            size="small"
-            onClick={() => void handlePlayNote(selectedNote)}
-            disabled={!isPrepared}
-          >
-            Play {selectedNote}
-          </Button>
-          <Button variant="outlined" color="error" size="small" onClick={() => void handleStopAll()}>
-            Stop All
-          </Button>
-        </Stack>
+        <Button variant="outlined" size="small" onClick={() => setIsExpanded((current) => !current)}>
+          {isExpanded ? "收起调试面板" : "展开调试面板"}
+        </Button>
       </Stack>
 
-      <Box
-        sx={{
-          mt: 1,
-          p: 1,
-          border: "2px solid #000",
-          borderRadius: "10px",
-          bgcolor: "#fff",
-        }}
-      >
-        <Typography variant="caption" sx={{ display: "block", fontWeight: 900 }}>
-          采样状态
+      {!isExpanded ? (
+        <Typography variant="caption" sx={{ display: "block", color: "#333" }}>
+          调试入口默认折叠，避免挤占正式练习界面。需要时再展开查看 sequence 和原生日志。
         </Typography>
-        <Typography variant="caption" sx={{ display: "block", mt: 0.25 }}>
-          {prepareResult
-            ? `已加载 ${prepareResult.loadedCount}/${prepareResult.totalCount}`
-            : "尚未执行 prepareSamples()"}
-        </Typography>
-        <Typography variant="caption" sx={{ display: "block", mt: 0.5, wordBreak: "break-word" }}>
-          {prepareResult ? describeLoadedNotes(prepareResult.loadedNotes) : "等待准备结果..."}
-        </Typography>
-      </Box>
+      ) : (
+        <>
+          <Stack spacing={1}>
+            <Stack direction="row" spacing={1} alignItems="stretch">
+              <FormControl fullWidth size="small">
+                <Select
+                  value={selectedNote}
+                  onChange={handleSelectedNoteChange}
+                  disabled={!isPrepared}
+                  sx={{
+                    bgcolor: "#fff",
+                    border: "2px solid #000",
+                    borderRadius: "10px",
+                    fontWeight: 900,
+                  }}
+                >
+                  {DEBUG_NOTE_OPTIONS.map((option) => (
+                    <MenuItem key={option.note} value={option.note}>
+                      {option.note}
+                      {!option.hasDirectSample ? " · fallback" : ""}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => void handlePlayNote(selectedNote)}
+                disabled={!isPrepared}
+              >
+                Play {selectedNote}
+              </Button>
+              <Button variant="outlined" color="error" size="small" onClick={() => void handleStopAll()}>
+                Stop All
+              </Button>
+            </Stack>
 
-      {lastError ? (
-        <Alert severity="error" sx={{ mt: 1 }}>
-          {lastError}
-        </Alert>
-      ) : null}
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => void handlePlaySequence()}
+                disabled={!isPrepared}
+              >
+                Play Sequence Demo
+              </Button>
+              <Button variant="outlined" size="small" onClick={() => void handleStopSequence()}>
+                Stop Sequence
+              </Button>
+            </Stack>
+          </Stack>
 
-      <Box
-        sx={{
-          mt: 1,
-          p: 1,
-          maxHeight: 140,
-          overflowY: "auto",
-          border: "2px solid #000",
-          bgcolor: "#111",
-          color: "#c8ff9e",
-          fontFamily: "monospace",
-          fontSize: "0.75rem",
-          whiteSpace: "pre-wrap",
-        }}
-      >
-        {logs.length === 0 ? "等待原生调试日志..." : logs.join("\n")}
-      </Box>
+          <Box
+            sx={{
+              mt: 1,
+              p: 1,
+              border: "2px solid #000",
+              borderRadius: "10px",
+              bgcolor: "#fff",
+            }}
+          >
+            <Typography variant="caption" sx={{ display: "block", fontWeight: 900 }}>
+              采样状态
+            </Typography>
+            <Typography variant="caption" sx={{ display: "block", mt: 0.25 }}>
+              {prepareResult
+                ? `已加载 ${prepareResult.loadedCount}/${prepareResult.totalCount}`
+                : "尚未执行 prepareSamples()"}
+            </Typography>
+            <Typography variant="caption" sx={{ display: "block", mt: 0.5, wordBreak: "break-word" }}>
+              {prepareResult ? describeLoadedNotes(prepareResult.loadedNotes) : "等待准备结果..."}
+            </Typography>
+          </Box>
+
+          {lastError ? (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {lastError}
+            </Alert>
+          ) : null}
+
+          <Box
+            sx={{
+              mt: 1,
+              p: 1,
+              maxHeight: 140,
+              overflowY: "auto",
+              border: "2px solid #000",
+              bgcolor: "#111",
+              color: "#c8ff9e",
+              fontFamily: "monospace",
+              fontSize: "0.75rem",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {logs.length === 0 ? "等待原生调试日志..." : logs.join("\n")}
+          </Box>
+        </>
+      )}
     </Paper>
   );
 }
