@@ -3,6 +3,7 @@ import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
 import Paper from "@mui/material/Paper";
 import MangaPiano from "./components/MangaPiano.tsx";
+import NativeAudioDebugPanel from "./components/NativeAudioDebugPanel.tsx";
 import VoiceTrainerControls from "./components/VoiceTrainerControls.tsx";
 import useExercisePlayback from "./hooks/useExercisePlayback.ts";
 import useManagedPlayer from "./hooks/useManagedPlayer.ts";
@@ -56,6 +57,7 @@ export default function App(): ReactElement {
           </Box>
 
           <VoiceTrainerControls {...controls} />
+          <NativeAudioDebugPanel />
         </Box>
 
         <Box sx={{ flexGrow: 1 }} />
