@@ -6,9 +6,15 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "cap:sync:android": "npm run build && npx cap sync android",
+    "cap:open:android": "npx cap open android",
+    "cap:run:android": "npm run build && npx cap run android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.1",
     "@mui/icons-material": "7.3.9",
@@ -18,13 +24,15 @@
     "tone": "^15.1.22"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.2.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.1.4",
     "agentation": "^2.3.3",
     "typescript": "5.9.3",
     "vite": "7.3.1",
-    "vite-plugin-pwa": "^1.2.0"
+    "vite-plugin-pwa": "^1.2.0",
+    "vitest": "^4.1.0"
   },
   "overrides": {
     "vite-plugin-pwa": {
