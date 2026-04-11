@@ -14,6 +14,7 @@ import useManagedPlayer from "./hooks/useManagedPlayer.ts";
 export default function App(): ReactElement {
   // 页面层直接组合“音频能力”和“练习状态机”两个核心 hook，
   // 少一层只做转发的包装，阅读路径会更短。
+  const isDev = import.meta.env.DEV;
   const { backend, isPlayerReady, player } = useManagedPlayer();
   const { controls, piano } = useExercisePlayback(player, isPlayerReady);
 
@@ -63,35 +64,39 @@ export default function App(): ReactElement {
               >
                 VOICE TRAINER
               </Box>
-              <Stack
-                direction="row"
-                spacing={1}
-                justifyContent="center"
-                flexWrap="wrap"
-                useFlexGap
-                sx={{ mt: 1 }}
-              >
-                <Chip
-                  label={`正式播放后端: ${backend.label}`}
-                  color={backend.isNative ? "success" : "default"}
-                  sx={{ fontWeight: 900 }}
-                />
-                <Chip
-                  label={isPlayerReady ? "播放器已就绪" : "播放器预热中"}
-                  color={isPlayerReady ? "primary" : "warning"}
-                  sx={{ fontWeight: 900 }}
-                />
-              </Stack>
-              <Typography
-                variant="caption"
-                sx={{ mt: 0.75, display: "block", fontWeight: 700, color: "#111" }}
-              >
-                {backend.description}
-              </Typography>
+              {isDev ? (
+                <>
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    justifyContent="center"
+                    flexWrap="wrap"
+                    useFlexGap
+                    sx={{ mt: 1 }}
+                  >
+                    <Chip
+                      label={`正式播放后端: ${backend.label}`}
+                      color={backend.isNative ? "success" : "default"}
+                      sx={{ fontWeight: 900 }}
+                    />
+                    <Chip
+                      label={isPlayerReady ? "播放器已就绪" : "播放器预热中"}
+                      color={isPlayerReady ? "primary" : "warning"}
+                      sx={{ fontWeight: 900 }}
+                    />
+                  </Stack>
+                  <Typography
+                    variant="caption"
+                    sx={{ mt: 0.75, display: "block", fontWeight: 700, color: "#111" }}
+                  >
+                    {backend.description}
+                  </Typography>
+                </>
+              ) : null}
             </Box>
 
             <VoiceTrainerControls {...controls} />
-            <NativeAudioDebugPanel formalPlaybackBackendLabel={backend.label} />
+            {isDev ? <NativeAudioDebugPanel formalPlaybackBackendLabel={backend.label} /> : null}
           </Box>
 
           <Box sx={{ mt: 1, mb: 1, flexShrink: 0 }}>
