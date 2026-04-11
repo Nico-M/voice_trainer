@@ -1,10 +1,13 @@
 import type { ReactElement } from "react";
+import ArrowBackRoundedIcon from "@mui/icons-material/ArrowBackRounded";
 import Box from "@mui/material/Box";
 import Chip from "@mui/material/Chip";
 import Container from "@mui/material/Container";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import ButtonBase from "@mui/material/ButtonBase";
+import { Link } from "@tanstack/react-router";
 import MangaPiano from "./components/MangaPiano.tsx";
 import NativeAudioDebugPanel from "./components/NativeAudioDebugPanel.tsx";
 import VoiceTrainerControls from "./components/VoiceTrainerControls.tsx";
@@ -21,7 +24,8 @@ export default function App(): ReactElement {
   return (
     <Box
       sx={{
-        bgcolor: "#ffde00",
+        background:
+          "radial-gradient(circle at top left, #f5f1e4 0%, #eef2f6 46%, #dde7ef 100%)",
         height: "100dvh",
         minHeight: "100dvh",
         display: "flex",
@@ -33,7 +37,7 @@ export default function App(): ReactElement {
         maxWidth="sm"
         sx={{
           px: 1.5,
-          py: 1,
+          py: 1.25,
           height: "100%",
           minHeight: 0,
           display: "flex",
@@ -49,6 +53,25 @@ export default function App(): ReactElement {
               pr: 0.25,
             }}
           >
+            <ButtonBase
+              component={Link}
+              to="/"
+              sx={{
+                mb: 1.25,
+                px: 1.4,
+                py: 0.85,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 0.75,
+                borderRadius: "999px",
+                border: "2px solid #000",
+                bgcolor: "#fff8cf",
+                boxShadow: "4px 4px 0px #000",
+              }}
+            >
+              <ArrowBackRoundedIcon sx={{ fontSize: 18 }} />
+              <Typography sx={{ fontWeight: 900, fontSize: "0.82rem" }}>返回首页</Typography>
+            </ButtonBase>
             <Box sx={{ mb: 1, textAlign: "center" }}>
               <Box
                 component="h1"
