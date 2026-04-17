@@ -153,11 +153,11 @@ function getPrimaryButtonIcon(
 
 function getPendingHint(playMode: PlayMode, lowerBoundNote: string, upperBoundNote: string): string {
   if (playMode === 'up') {
-    return `已待命，按键盘上的起始音开始，将在 ${lowerBoundNote} 到 ${upperBoundNote} 范围内上行后折返`;
+    return `已待命，按键盘上的起始音开始，将在起始音范围 ${lowerBoundNote} 到 ${upperBoundNote} 内上行后折返`;
   }
 
   if (playMode === 'down') {
-    return `已待命，按键盘上的起始音开始，将在 ${lowerBoundNote} 到 ${upperBoundNote} 范围内下行后折返`;
+    return `已待命，按键盘上的起始音开始，将在起始音范围 ${lowerBoundNote} 到 ${upperBoundNote} 内下行后折返`;
   }
 
   return '已待命，按键盘上的任意起始音开始';
@@ -457,7 +457,7 @@ export default function VoiceTrainerControls({
           </Typography>
           {selectedExercise && playMode !== 'once' && (
             <Typography sx={{ mt: 0.6, fontSize: '0.68rem', fontWeight: 900, color: '#333' }}>
-              当前练习音域：{lowerBoundNote} 到 {upperBoundNote}
+              当前起始音范围：{lowerBoundNote} 到 {upperBoundNote}
             </Typography>
           )}
           {!isPlayerReady && (
@@ -495,11 +495,11 @@ export default function VoiceTrainerControls({
           sx={{ display: 'flex', alignItems: 'center', gap: 0.8, fontWeight: 900, pb: 0.5 }}
         >
           <SettingsVoiceRoundedIcon sx={{ fontSize: 22 }} />
-          设置练习音域
+          设置起始音范围
         </DialogTitle>
         <DialogContent sx={{ pt: '8px !important' }}>
           <Typography sx={{ mb: 1.2, fontSize: '0.74rem', fontWeight: 700, color: '#444' }}>
-            自动上下行会在这个范围内折返，回到你的起始音后停止。
+            自动上下行会把每一轮练习的起始音限制在这个范围内，回到你最初选的起始音后停止。
           </Typography>
           <Box
             sx={{
@@ -554,7 +554,7 @@ export default function VoiceTrainerControls({
             </FormControl>
           </Box>
           <Typography sx={{ mt: 1.2, fontSize: '0.72rem', fontWeight: 900, color: '#333' }}>
-            当前音域：{lowerBoundNote} 到 {upperBoundNote}
+            当前起始音范围：{lowerBoundNote} 到 {upperBoundNote}
           </Typography>
         </DialogContent>
       </Dialog>

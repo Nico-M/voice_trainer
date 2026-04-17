@@ -122,10 +122,18 @@ export function getExerciseIntervalBounds(exercise: Exercise): ExerciseIntervalB
   );
 }
 
-// 起始音是否合法，不看根音本身，而是看整条练习实际发出的最低/最高音是否仍在可播放范围内。
+// 起始音是否合法，不看根音本身，而是看整条练习实际发出的最低/最高音是否仍在钢琴可播放范围内。
 export function isExerciseStartIndexPlayable(exercise: Exercise, startIndex: number): boolean {
   const { minInterval, maxInterval } = getExerciseIntervalBounds(exercise);
   return isPlayableIndex(startIndex + minInterval) && isPlayableIndex(startIndex + maxInterval);
+}
+
+export function isStartIndexWithinBounds(
+  startIndex: number,
+  lowerBoundIndex: number,
+  upperBoundIndex: number,
+): boolean {
+  return startIndex >= lowerBoundIndex && startIndex <= upperBoundIndex;
 }
 
 interface AutoRoundStartIndexesOptions {
@@ -170,7 +178,7 @@ function buildRoundTripStartIndexes(
   return roundStartIndexes;
 }
 
-// 自动上行/下行不再无限推进，而是在默认音域边界内构造一条“去程 + 回程”的播放计划。
+// 自动上行/下行不再无限推进，而是在“起始音范围”内构造一条“去程 + 回程”的播放计划。
 export function buildAutoRoundStartIndexes({
   exercise,
   lowerBoundIndex,
@@ -178,9 +186,7 @@ export function buildAutoRoundStartIndexes({
   startNoteIndex,
   upperBoundIndex,
 }: AutoRoundStartIndexesOptions): number[] | null {
-  const { minInterval, maxInterval } = getExerciseIntervalBounds(exercise);
-  const turnStartIndex =
-    playMode === 'up' ? upperBoundIndex - maxInterval : lowerBoundIndex - minInterval;
+  const turnStartIndex = playMode === 'up' ? upperBoundIndex : lowerBoundIndex;
 
   if (playMode === 'up' && startNoteIndex > turnStartIndex) {
     return null;
@@ -191,6 +197,8 @@ export function buildAutoRoundStartIndexes({
   }
 
   if (
+    !isStartIndexWithinBounds(startNoteIndex, lowerBoundIndex, upperBoundIndex) ||
+    !isStartIndexWithinBounds(turnStartIndex, lowerBoundIndex, upperBoundIndex) ||
     !isExerciseStartIndexPlayable(exercise, startNoteIndex) ||
     !isExerciseStartIndexPlayable(exercise, turnStartIndex)
   ) {

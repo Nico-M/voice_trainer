@@ -40,11 +40,11 @@ function getPlannerErrorMessage(
     case 'invalid-start-note':
       return '当前起始音无法识别，请换一个键再试。';
     case 'invalid-boundary-note':
-      return '练习音域配置异常，请重新调整最低音和最高音。';
+      return '起始音范围配置异常，请重新调整最低音和最高音。';
     case 'start-note-out-of-range':
-      return '这个起始音超出当前练习的可播放范围，请换一个更合适的音。';
+      return `这个起始音不在当前设定的起始音范围 ${lowerBoundNote} 到 ${upperBoundNote} 内，或超出练习可播放范围，请换一个更合适的音。`;
     case 'round-trip-out-of-range':
-      return `当前模式会在 ${lowerBoundNote} 到 ${upperBoundNote} 范围内折返，请换一个起始音。`;
+      return `当前模式会在起始音范围 ${lowerBoundNote} 到 ${upperBoundNote} 内折返，请换一个起始音。`;
     default:
       return error.message;
   }
