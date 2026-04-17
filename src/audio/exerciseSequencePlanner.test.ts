@@ -66,15 +66,15 @@ describe('buildExercisePlaybackSequence', () => {
     expect(error.code).toBe('start-note-out-of-range');
   });
 
-  it('在往返模式无法落进边界时抛出 round-trip-out-of-range', () => {
+  it('在往返模式边界起始音无法完整执行练习时抛出 round-trip-out-of-range', () => {
     const error = getPlannerError(() =>
       buildExercisePlaybackSequence({
-        exercise: getRequiredExercise('scale-6'),
-        startNote: 'E4',
+        exercise: getRequiredExercise('scale-2'),
+        startNote: 'C7',
         playMode: 'up',
         bpm: 90,
-        lowerBoundNote: 'C4',
-        upperBoundNote: 'G4',
+        lowerBoundNote: 'C7',
+        upperBoundNote: 'C8',
       }),
     );
 
@@ -117,9 +117,33 @@ describe('buildExercisePlaybackSequence', () => {
       upperBoundNote: 'G4',
     });
 
-    expect(getRoundLeadNotes(sequence)).toEqual(['C4', 'C#4', 'D4', 'D#4', 'D4', 'C#4', 'C4']);
-    expect(sequence.steps).toHaveLength(35);
+    expect(getRoundLeadNotes(sequence)).toEqual([
+      'C4',
+      'C#4',
+      'D4',
+      'D#4',
+      'E4',
+      'F4',
+      'F#4',
+      'G4',
+      'F#4',
+      'F4',
+      'E4',
+      'D#4',
+      'D4',
+      'C#4',
+      'C4',
+    ]);
+    expect(sequence.steps).toHaveLength(75);
     expect(sequence.steps.filter((step) => step.stepIndex === 4).map((step) => step.durationMs)).toEqual([
+      1625,
+      1625,
+      1625,
+      1625,
+      1625,
+      1625,
+      1625,
+      1625,
       1625,
       1625,
       1625,
@@ -128,6 +152,21 @@ describe('buildExercisePlaybackSequence', () => {
       1625,
       1000,
     ]);
+  });
+
+  it('在 once 模式下也要求起始音落在设定范围内', () => {
+    const error = getPlannerError(() =>
+      buildExercisePlaybackSequence({
+        exercise: getRequiredExercise('scale-6'),
+        startNote: 'B2',
+        playMode: 'once',
+        bpm: 90,
+        lowerBoundNote: 'C3',
+        upperBoundNote: 'C5',
+      }),
+    );
+
+    expect(error.code).toBe('start-note-out-of-range');
   });
 
   it('在 down 模式下生成下行到底再折返的轮次序列', () => {

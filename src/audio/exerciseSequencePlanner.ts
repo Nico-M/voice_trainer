@@ -6,6 +6,7 @@ import {
   getStepDurationMs,
   getStepNoteDurationMs,
   isExerciseStartIndexPlayable,
+  isStartIndexWithinBounds,
   parseNoteToChromaticIndex,
 } from '../utils/voiceTrainerPlaybackUtils.ts';
 
@@ -155,6 +156,14 @@ export function buildExercisePlaybackSequence({
     lowerBoundNote,
     upperBoundNote,
   );
+
+  if (!isStartIndexWithinBounds(startNoteIndex, lowerBoundIndex, upperBoundIndex)) {
+    throw new ExerciseSequencePlannerError(
+      'start-note-out-of-range',
+      '当前起始音不在设定的起始音范围内。',
+    );
+  }
+
   const roundStartIndexes = resolveRoundStartIndexes({
     exercise,
     lowerBoundIndex,

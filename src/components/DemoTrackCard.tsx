@@ -1,4 +1,5 @@
 import type { PointerEvent as ReactPointerEvent, ReactElement } from 'react';
+import CircularProgress from '@mui/material/CircularProgress';
 import PauseCircleRoundedIcon from '@mui/icons-material/PauseCircleRounded';
 import PlayCircleRoundedIcon from '@mui/icons-material/PlayCircleRounded';
 import Box from '@mui/material/Box';
@@ -89,6 +90,11 @@ export default function DemoTrackCard({
             <Typography sx={{ fontWeight: 900, fontSize: '1rem', color: '#102132' }}>
               {track.title}
             </Typography>
+            {viewState.isLoading ? (
+              <Typography sx={{ mt: 0.7, fontSize: '0.78rem', fontWeight: 800, color: '#9b6a00' }}>
+                正在加载音频...
+              </Typography>
+            ) : null}
             <Box
               sx={{
                 mt: 1.1,
@@ -109,6 +115,7 @@ export default function DemoTrackCard({
         </Box>
         <ButtonBase
           onClick={() => void onToggle(track)}
+          disabled={viewState.isLoading}
           sx={{
             width: 70,
             height: 70,
@@ -117,16 +124,19 @@ export default function DemoTrackCard({
             border: '2px solid #102132',
             bgcolor: viewState.isActive ? '#102132' : '#fff',
             color: viewState.isActive ? '#fff' : '#102132',
+            opacity: viewState.isLoading ? 0.92 : 1,
           }}
         >
           <Stack spacing={0.3} alignItems="center">
-            {viewState.isActive ? (
+            {viewState.isLoading ? (
+              <CircularProgress size={24} thickness={5} sx={{ color: '#102132' }} />
+            ) : viewState.isActive ? (
               <PauseCircleRoundedIcon sx={{ fontSize: 32 }} />
             ) : (
               <PlayCircleRoundedIcon sx={{ fontSize: 32 }} />
             )}
             <Typography sx={{ fontSize: '0.72rem', fontWeight: 900 }}>
-              {viewState.isActive ? '停止' : '播放'}
+              {viewState.isLoading ? '加载中' : viewState.isActive ? '停止' : '播放'}
             </Typography>
           </Stack>
         </ButtonBase>

@@ -9,6 +9,7 @@ interface SeekGestureState {
 export interface DemoTrackViewState {
   durationLabel: string;
   isActive: boolean;
+  isLoading: boolean;
   isSeekEnabled: boolean;
   positionLabel: string;
   progressRatio: number;
@@ -100,10 +101,12 @@ function waitForLoadedMetadata(audio: HTMLAudioElement): Promise<number> {
 export default function useDemoAudioPlayer(): UseDemoAudioPlayerResult {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentAudioSrcRef = useRef<string | null>(null);
+  const pendingRequestIdRef = useRef(0);
   const seekGestureRef = useRef<SeekGestureState | null>(null);
 
   const [activeTrackId, setActiveTrackId] = useState<string | null>(null);
   const [dragPreviewTime, setDragPreviewTime] = useState<number | null>(null);
+  const [loadingTrackId, setLoadingTrackId] = useState<string | null>(null);
   const [playbackDuration, setPlaybackDuration] = useState(0);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
   const [playbackPosition, setPlaybackPosition] = useState(0);
@@ -128,6 +131,7 @@ export default function useDemoAudioPlayer(): UseDemoAudioPlayerResult {
     }
 
     function handleEnded(): void {
+      setLoadingTrackId(null);
       setActiveTrackId(null);
       setPlaybackPosition(0);
       setPlaybackDuration(0);
@@ -136,6 +140,7 @@ export default function useDemoAudioPlayer(): UseDemoAudioPlayerResult {
 
     function handleError(): void {
       setPlaybackError('示范音频加载失败，请检查 public 目录下的音频路径。');
+      setLoadingTrackId(null);
       setActiveTrackId(null);
       setPlaybackPosition(0);
       setPlaybackDuration(0);
@@ -162,9 +167,12 @@ export default function useDemoAudioPlayer(): UseDemoAudioPlayerResult {
       return;
     }
 
+    // 每次手动停止都让之前挂起的加载结果失效，避免慢网返回后把 UI 又切回播放态。
+    pendingRequestIdRef.current += 1;
     audio.pause();
     audio.currentTime = 0;
     seekGestureRef.current = null;
+    setLoadingTrackId(null);
     setActiveTrackId(null);
     setPlaybackPosition(0);
     setPlaybackDuration(0);
@@ -181,12 +189,20 @@ export default function useDemoAudioPlayer(): UseDemoAudioPlayerResult {
       return;
     }
 
+    const requestId = pendingRequestIdRef.current + 1;
+    pendingRequestIdRef.current = requestId;
+
     if (!audioSrc) {
+      setLoadingTrackId(null);
       setPlaybackError('当前示范条目还没有配置音频地址。');
       return;
     }
 
     setPlaybackError(null);
+    setLoadingTrackId(trackId);
+    setActiveTrackId(null);
+    setPlaybackPosition(0);
+    setDragPreviewTime(null);
 
     try {
       audio.pause();
@@ -198,6 +214,10 @@ export default function useDemoAudioPlayer(): UseDemoAudioPlayerResult {
       }
 
       const resolvedDuration = await waitForLoadedMetadata(audio);
+      if (pendingRequestIdRef.current !== requestId) {
+        return;
+      }
+
       const nextTime = clampPlaybackTime(startTimeSeconds, resolvedDuration || startTimeSeconds);
 
       audio.currentTime = nextTime;
@@ -205,8 +225,19 @@ export default function useDemoAudioPlayer(): UseDemoAudioPlayerResult {
       setPlaybackPosition(nextTime);
       setDragPreviewTime(null);
       await audio.play();
+      if (pendingRequestIdRef.current !== requestId) {
+        audio.pause();
+        return;
+      }
+
+      setLoadingTrackId(null);
       setActiveTrackId(trackId);
     } catch (error) {
+      if (pendingRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setLoadingTrackId(null);
       setPlaybackError(error instanceof Error ? error.message : '示范音频播放失败。');
       setActiveTrackId(null);
       setPlaybackPosition(0);
@@ -319,17 +350,19 @@ export default function useDemoAudioPlayer(): UseDemoAudioPlayerResult {
 
   const getTrackViewState = useCallback((track: ScaleDemoTrack): DemoTrackViewState => {
     const isActive = activeTrackId === track.id;
+    const isLoading = loadingTrackId === track.id;
     const durationSeconds = getResolvedTrackDuration(track, isActive);
     const positionSeconds = getResolvedTrackPosition(isActive);
 
     return {
       durationLabel: formatPlaybackTime(durationSeconds),
       isActive,
+      isLoading,
       isSeekEnabled: isActive && durationSeconds > 0,
       positionLabel: formatPlaybackTime(positionSeconds),
       progressRatio: getProgressRatio(positionSeconds, durationSeconds),
     };
-  }, [activeTrackId, getResolvedTrackDuration, getResolvedTrackPosition]);
+  }, [activeTrackId, getResolvedTrackDuration, getResolvedTrackPosition, loadingTrackId]);
 
   return {
     audioRef,
